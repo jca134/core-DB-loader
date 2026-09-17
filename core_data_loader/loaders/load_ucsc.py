@@ -1,20 +1,3 @@
-"""
-Loads a curated subset of the UCSC eboVir3 genome-browser track tables into
-raw.ucsc_<table>. Column names are parsed directly out of UCSC's own MySQL
-dump files (data/ucsc/database/<table>.sql) so raw mirrors the source
-exactly, same as load_bvbrc.py does for the BV-BRC CSVs.
-
-Deliberately NOT loaded (browser-internal, or out of scope for now):
-- trackDb, hgFindSpec, tableList, tableDescriptions, extFile, bigFiles, grp,
-  history, muPIT: UCSC Genome Browser internal plumbing, not biological data.
-- multiz160way / multiz160wayFrames / mafSnp160way / mafSnpStrainName160way:
-  the alignment itself lives in the .maf.gz files, not worth a relational
-  mirror at this stage.
-- iedbsupp1_<HLA>* / iedbsupp2_<HLA>* (~60 tables): per-HLA-allele IEDB
-  benchmark supplement tables, not referenced anywhere else in our data.
-  Revisit if a use case shows up.
-"""
-
 import gzip
 import os
 import re

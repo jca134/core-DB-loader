@@ -12,8 +12,6 @@ def main():
     batch_id, source_id = start_batch(SOURCE_CODE, notes=f"load_hfv.py over {FOLDER}")
 
     try:
-        # These three are raw LANL alignment matrices: no header row, just a
-        # strain label and its aligned sequence per line.
         for fname, table in [
             ("F15AG1.csv", "hfv_f15ag1"),
             ("F15OG1.csv", "hfv_f15og1"),

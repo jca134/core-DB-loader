@@ -1,12 +1,3 @@
-"""
-Shared, source-agnostic helpers: the DB connection and defensive parsers for
-the all-TEXT columns everything in raw.* gets loaded with.
-
-Layering: db_utils (this file, no schema knowledge) -> sources (the
-core.source catalog) -> raw_common (load_*.py helpers) -> etl_common
-(etl_*.py helpers).
-"""
-
 import hashlib
 import os
 import re

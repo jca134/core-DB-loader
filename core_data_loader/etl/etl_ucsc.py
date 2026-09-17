@@ -1,26 +1,3 @@
-"""
-Populates core.gene / core.gene_domain from raw.ucsc_ncbi_gene and
-raw.ucsc_ncbi_gene_pfam (loaded by load_ucsc.py) — UCSC's single-reference
-eboVir3 gene model and its Pfam domain annotations. Also pulls in
-raw.ucsc_gene_desc (per-gene functional description text, keyed by gene
-symbol) to populate core.gene.description — previously loaded to raw but
-never used.
-
-chrom values (e.g. "KM034562v1") are resolved to a core.sequence row by
-stripping the UCSC "vN" assembly suffix and matching the base accession
-against core.xref's genbank_accession xrefs. If more than one core.sequence
-shares that accession (e.g. one loaded via BV-BRC, one via NCBI), the
-lowest sequence_id is used — an arbitrary but deterministic tie-break.
-
-Domains are linked to the gene whose transcript span contains them; when
-more than one gene's span contains a domain (GP/sGP/ssGP share the same
-txStart/txEnd, differing only in cds_end due to Ebola's transcriptional
-RNA-editing site), the gene whose CDS also contains the domain is
-preferred, falling back to the first containing gene otherwise.
-
-Safe to re-run: truncates its own core tables first.
-"""
-
 import re
 
 from core_data_loader.common.etl_common import (

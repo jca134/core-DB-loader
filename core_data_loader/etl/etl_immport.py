@@ -1,23 +1,3 @@
-"""
-Populates the ImmPort-shaped half of `core` (study, study_arm, subject,
-study_arm_subject, biosample, experiment, experiment_sample, protocol,
-experiment_protocol, condition, study_condition, treatment,
-biosample_treatment, immune_exposure, publication, study_publication) from
-the raw.immport_sdy<NNNN>_* tables loaded by load_immport.py.
-
-core.assay_result is left empty: none of the 3 studies' downloads included
-any of ImmPort's per-assay result tables (elisa_result, elispot_result,
-mbaa_result, ...), only the lk_expsample_result_schema lookup came through.
-
-ops.entity_provenance is recorded for every core table here except the pure
-many-to-many junction tables (study_arm_subject, experiment_protocol,
-study_condition, biosample_treatment, study_publication) — those don't have
-their own surrogate id to hang a core_pk on, and are themselves just a
-relationship between two already-provenanced entities.
-
-Safe to re-run: truncates its own core tables first.
-"""
-
 import pandas as pd
 
 from core_data_loader.common.etl_common import (
