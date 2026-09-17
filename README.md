@@ -36,7 +36,7 @@ shared `core.*` schema.
    ```
 
 4. Add source data. `data/` is git-ignored, so you'll need to place the raw
-   downloads yourself, one subfolder per source:
+   downloads yourself, one subfolder per source. Put the data folder under the project root:
 
    ```
    data/bvbrc/     data/hfv/     data/immport/     data/ncbi/     data/ucsc/

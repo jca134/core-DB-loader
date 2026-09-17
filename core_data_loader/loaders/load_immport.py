@@ -10,6 +10,12 @@ ImmPort's own platform bookkeeping, not the study itself; no core.* table or
 ETL step reads them, and they're duplicated near-verbatim across all 3
 studies. Loading those would just be raw-schema bloat, so only the tables
 below get mirrored. Add a table here if a future ETL step needs it.
+
+One exception: lk_disease.txt carries real Disease Ontology ids per condition
+name (e.g. "Ebola hemorrhagic fever" -> DOID:4325), which etl_immport.py uses
+to populate core.condition.ontology_id. It's identical across all 3 study
+exports, so it's loaded once as raw.immport_lk_disease (no per-study prefix)
+instead of duplicated three times.
 """
 
 import glob
@@ -26,7 +32,35 @@ TABLES_TO_LOAD = {
     "experiment", "expsample", "expsample_2_biosample", "protocol",
     "experiment_2_protocol", "study_2_condition_or_disease", "treatment",
     "expsample_2_treatment", "immune_exposure", "study_pubmed",
+    "expsample_public_repository",
 }
+
+LK_DISEASE_SOURCE_CODE = "immport_sdy1373"
+
+
+def load_lk_disease():
+    """
+    lk_disease.txt is duplicated verbatim in every study export, so mirror it
+    once from whichever study directory has it, rather than once per study.
+    """
+    for study_dir in sorted(glob.glob("data/immport/SDY*_ALL_DATA")):
+        candidates = glob.glob(os.path.join(study_dir, "*_Tab", "Tab", "lk_disease.txt"))
+        if candidates:
+            filepath = candidates[0]
+            break
+    else:
+        print("Skipping raw.immport_lk_disease: lk_disease.txt not found in any study export")
+        return
+
+    batch_id, source_id = start_batch(LK_DISEASE_SOURCE_CODE, notes=f"load_immport.py over {filepath}")
+    try:
+        df = pd.read_csv(filepath, sep="\t", dtype=str, keep_default_na=False)
+        load_to_raw(df, "immport_lk_disease", batch_id=batch_id, source_id=source_id, file_path=filepath)
+    except Exception:
+        complete_batch(batch_id, status="failed")
+        raise
+    else:
+        complete_batch(batch_id, status="succeeded")
 
 
 def main():
@@ -68,6 +102,8 @@ def main():
             raise
         else:
             complete_batch(batch_id, status="succeeded")
+
+    load_lk_disease()
 
     print("Finished loading all ImmPort studies.")
 

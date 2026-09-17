@@ -18,14 +18,29 @@ the UCSC tables that would feed them (gire2014*, spMut, ...) are external
 bigBed/VCF pointer tracks with no row data in this download (see
 load_ucsc.py).
 
+Also folds in two LANL HFV tables that were loaded to raw but previously
+never transformed:
+- hfv_ebov_features: curated genome features (regulatory elements, mRNAs,
+  proteins, mutations) on the Mayinga reference (NC_002549), with literature
+  PMIDs -> core.feature rows attached to that one reference sequence, with
+  the PMIDs recorded as core.xref(entity_type='feature', xref_type='pmid').
+- hfv_ebola_annotation_web: curated per-accession isolate/patient metadata.
+  Resolved by GenBank accession to an existing core.isolate (already created
+  from BV-BRC/NCBI) and used to backfill lanl_strain_name plus the
+  patient_*/*_date columns — an UPDATE, not an insert, since the isolate
+  already exists. Accessions that don't resolve to an existing isolate are
+  left alone.
+
 Safe to re-run: truncates its own core tables (and its slice of core.xref)
-first.
+first; the isolate-enrichment UPDATE is idempotent (same source data always
+computes the same values).
 """
 
 import itertools
 from dataclasses import dataclass, field
 
 import pandas as pd
+from sqlalchemy import text
 
 from core_data_loader.common.etl_common import (
     engine, ensure_sources, truncate, read_raw,
@@ -40,7 +55,7 @@ HFV = "hfv_lanl"
 
 NEUTRALIZING_TRUE = {"y", "yes", "true", "1"}
 
-ENTITY_TYPES_OWNED = ["isolate", "sequence", "protein", "epitope", "antibody"]
+ENTITY_TYPES_OWNED = ["isolate", "sequence", "feature", "protein", "epitope", "antibody"]
 
 PROVENANCE_TABLES_OWNED = [
     "taxon", "isolate", "sequence", "feature", "protein",
@@ -507,6 +522,94 @@ def build_alignments(ctx: BuildContext):
     return pd.DataFrame(alignment_rows), pd.DataFrame(member_rows)
 
 
+def build_hfv_features(ctx: BuildContext, ebov_features: pd.DataFrame) -> pd.DataFrame:
+    """
+    hfv_ebov_features rows are all coordinates on the Mayinga reference
+    genome (NC_002549) specifically -- unlike bvbrc_genome_feature, which is
+    per-isolate -- so every row attaches to that one reference sequence.
+    """
+    rows = []
+    reference_sequence_id = ctx.accession_to_sequence.get("NC_002549")
+    if reference_sequence_id is None:
+        print("core.feature (hfv_ebov_features): skipped, NC_002549 not found among core.sequence accessions")
+        return pd.DataFrame(rows)
+
+    for r in ebov_features.itertuples(index=False):
+        fid = next(ctx.feature_id_seq)
+        rows.append({
+            "feature_id": fid,
+            "sequence_id": reference_sequence_id,
+            "feature_type": blank_to_none(r.feature_type),
+            "start": safe_int(r.start),
+            "end": safe_int(r.stop),
+            "strand": None,
+            "gene": None,
+            "product": blank_to_none(r.feature),
+            "annotation": blank_to_none(r.note),
+            "source_id": ctx.hfv_sid,
+        })
+        add_xref(ctx.xref_rows, "feature", fid, ctx.hfv_sid, "pmid", r.ref1pmid)
+        add_xref(ctx.xref_rows, "feature", fid, ctx.hfv_sid, "pmid", r.ref2pmid)
+        add_provenance(ctx.provenance_rows, "feature", fid, ctx.hfv_sid, "hfv_ebov_features", r.feature)
+
+    return pd.DataFrame(rows)
+
+
+def apply_hfv_isolate_enrichment(ctx: BuildContext, conn, annotation: pd.DataFrame) -> int:
+    """
+    hfv_ebola_annotation_web doesn't mint new isolates -- it enriches ones
+    already built from bvbrc_genome/ncbi_sequences, matched by GenBank
+    accession. COALESCE keeps whatever the isolate already had if this table
+    doesn't cover it (e.g. an isolate BV-BRC/NCBI provided that LANL didn't
+    curate), and lets a re-run stay idempotent.
+    """
+    def clean(v):
+        # LANL uses a bare "_" as its own null placeholder throughout this
+        # table, distinct from blank_to_none's "empty string" handling.
+        v = blank_to_none(v)
+        return None if v == "_" else v
+
+    updated = 0
+    for r in annotation.itertuples(index=False):
+        accession = blank_to_none(r.accession)
+        seq_id = ctx.accession_to_sequence.get(accession) if accession else None
+        isolate_id = ctx.sequence_to_isolate.get(seq_id) if seq_id is not None else None
+        if isolate_id is None:
+            continue
+
+        # e.g. "EBOV/H.sap-tc/COD/76/Yambuku-Mayinga/NC_002549" -> drop the
+        # trailing accession to match the LANL nomenclature documented on
+        # core.isolate.lanl_strain_name.
+        name = blank_to_none(r.modified_standardized_name)
+        lanl_strain_name = name.rsplit("/", 1)[0] if name else None
+
+        conn.execute(
+            text(
+                """
+                UPDATE core.isolate
+                SET lanl_strain_name = COALESCE(lanl_strain_name, :lanl_strain_name),
+                    patient_outcome = COALESCE(patient_outcome, :patient_outcome),
+                    patient_age = COALESCE(patient_age, :patient_age),
+                    patient_sex = COALESCE(patient_sex, :patient_sex),
+                    symptom_onset_date = COALESCE(symptom_onset_date, :symptom_onset_date),
+                    death_date = COALESCE(death_date, :death_date)
+                WHERE isolate_id = :isolate_id
+                """
+            ),
+            {
+                "lanl_strain_name": lanl_strain_name,
+                "patient_outcome": clean(r.patient_outcome),
+                "patient_age": clean(r.patient_age),
+                "patient_sex": clean(r.patient_sex),
+                "symptom_onset_date": safe_date(r.patient_date_of_symptoms_onset),
+                "death_date": safe_date(r.patient_date_of_death),
+                "isolate_id": isolate_id,
+            },
+        )
+        updated += 1
+    return updated
+
+
 def main():
     source_ids = ensure_sources()
     ctx = BuildContext(
@@ -563,6 +666,14 @@ def main():
     member_df = _write(alignment_member_df, "alignment_member")
     matched = member_df["sequence_id"].notna().sum()
     print(f"  ({matched} matched to a core.sequence)")
+
+    ebov_features = read_raw("hfv_ebov_features")
+    _write(build_hfv_features(ctx, ebov_features), "feature", " (from hfv_ebov_features)")
+
+    annotation_web = read_raw("hfv_ebola_annotation_web")
+    with engine.begin() as conn:
+        enriched = apply_hfv_isolate_enrichment(ctx, conn, annotation_web)
+    print(f"core.isolate: {enriched} rows enriched from hfv_ebola_annotation_web")
 
     write_xref(ctx.xref_rows, ENTITY_TYPES_OWNED)
     write_provenance(ctx.provenance_rows, PROVENANCE_TABLES_OWNED)

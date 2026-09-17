@@ -156,7 +156,8 @@ def main():
     add_provenance_bulk(provenance_rows, experiment, "experiment", "experiment_accession")
     print(f"core.experiment: {len(core_experiment)} rows")
 
-    # experiment_sample (expsample joined to its biosample link)
+    # experiment_sample (expsample joined to its biosample link, and to its
+    # public-repository accession if it has one — e.g. a GEO GSM id)
     expsample = concat_tables("expsample", source_ids)
     e2b = concat_tables("expsample_2_biosample", source_ids)
     if not e2b.empty:
@@ -167,12 +168,26 @@ def main():
         )
     else:
         expsample["biosample_accession"] = None
+
+    repository = concat_tables("expsample_public_repository", source_ids)
+    if not repository.empty:
+        repo_first = repository.drop_duplicates(subset="expsample_accession", keep="first")
+        expsample = expsample.merge(
+            repo_first[["expsample_accession", "repository_name", "repository_accession"]],
+            on="expsample_accession", how="left",
+        )
+    else:
+        expsample["repository_name"] = None
+        expsample["repository_accession"] = None
+
     core_expsample = pd.DataFrame({
         "expsample_accession": expsample["expsample_accession"],
         "experiment_accession": expsample["experiment_accession"],
         "biosample_accession": expsample["biosample_accession"],
         "name": expsample["name"],
         "result_schema": expsample["result_schema"],
+        "repository_name": expsample["repository_name"],
+        "repository_accession": expsample["repository_accession"],
     })
     core_expsample.to_sql("experiment_sample", engine, schema="core", if_exists="append", index=False)
     add_provenance_bulk(provenance_rows, expsample, "experiment_sample", "expsample_accession")
@@ -206,7 +221,27 @@ def main():
         # lookup below (condition_id itself is a DB-generated surrogate,
         # not something present in the raw data).
         distinct_full = s2c.drop_duplicates(subset=["condition_reported", "condition_preferred"], keep="first")
-        distinct_conditions = distinct_full[["condition_reported", "condition_preferred"]]
+        distinct_conditions = distinct_full[["condition_reported", "condition_preferred"]].copy()
+
+        # lk_disease.txt is ImmPort's own controlled vocabulary of condition
+        # names -> Disease Ontology ids (e.g. "Ebola hemorrhagic fever" ->
+        # "DOID:4325"); match on condition_preferred, falling back to
+        # condition_reported for rows with no preferred term.
+        if raw_table_exists("immport_lk_disease"):
+            lk_disease = read_raw("immport_lk_disease")[["name", "disease_ontology_id"]]
+            distinct_conditions = distinct_conditions.merge(
+                lk_disease.rename(columns={"name": "condition_preferred", "disease_ontology_id": "ontology_id"}),
+                on="condition_preferred", how="left",
+            )
+            missing = distinct_conditions["ontology_id"].isna()
+            fallback = distinct_conditions.loc[missing, ["condition_reported"]].merge(
+                lk_disease.rename(columns={"name": "condition_reported", "disease_ontology_id": "ontology_id"}),
+                on="condition_reported", how="left",
+            )
+            distinct_conditions.loc[missing, "ontology_id"] = fallback["ontology_id"].values
+        else:
+            distinct_conditions["ontology_id"] = None
+
         distinct_conditions.to_sql("condition", engine, schema="core", if_exists="append", index=False)
         lookup = pd.read_sql_table("condition", engine, schema="core")
         s2c_with_id = s2c.merge(lookup, on=["condition_reported", "condition_preferred"], how="left")
@@ -263,8 +298,10 @@ def main():
         "exposure_process_preferred": exposure["exposure_process_preferred"],
         "exposure_material_reported": exposure["exposure_material_reported"],
         "exposure_material_preferred": exposure["exposure_material_preferred"],
+        "exposure_material_ontology_id": exposure["exposure_material_id"],
         "disease_reported": exposure["disease_reported"],
         "disease_preferred": exposure["disease_preferred"],
+        "disease_ontology_id": exposure["disease_ontology_id"],
         "disease_stage_reported": exposure["disease_stage_reported"],
         "disease_stage_preferred": exposure["disease_stage_preferred"],
     })

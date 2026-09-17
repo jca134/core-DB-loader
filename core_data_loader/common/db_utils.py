@@ -49,7 +49,10 @@ def safe_float(v):
         return None
 
 
-_DATE_FORMATS = ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d", "%m/%d/%Y")
+_DATE_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y",
+)
 
 
 def safe_date(v):

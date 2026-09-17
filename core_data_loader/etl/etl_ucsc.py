@@ -1,7 +1,10 @@
 """
 Populates core.gene / core.gene_domain from raw.ucsc_ncbi_gene and
 raw.ucsc_ncbi_gene_pfam (loaded by load_ucsc.py) — UCSC's single-reference
-eboVir3 gene model and its Pfam domain annotations.
+eboVir3 gene model and its Pfam domain annotations. Also pulls in
+raw.ucsc_gene_desc (per-gene functional description text, keyed by gene
+symbol) to populate core.gene.description — previously loaded to raw but
+never used.
 
 chrom values (e.g. "KM034562v1") are resolved to a core.sequence row by
 stripping the UCSC "vN" assembly suffix and matching the base accession
@@ -21,10 +24,20 @@ Safe to re-run: truncates its own core tables first.
 import re
 
 from core_data_loader.common.etl_common import (
-    engine, ensure_sources, truncate, read_raw, safe_int,
+    engine, ensure_sources, truncate, read_raw, safe_int, blank_to_none,
     add_provenance, write_provenance,
 )
 from sqlalchemy import text
+
+HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def clean_gene_description(html: str) -> str | None:
+    text_only = HTML_TAG_RE.sub(" ", html).strip()
+    # Every row starts with a redundant "Gene Description" header once tags
+    # are stripped -- drop it rather than repeating it in every row.
+    text_only = re.sub(r"^Gene Description\s*", "", text_only)
+    return blank_to_none(re.sub(r"\s+", " ", text_only))
 
 PROVENANCE_TABLES_OWNED = ["gene", "gene_domain"]
 
@@ -56,6 +69,10 @@ def main():
 
     gene_raw = read_raw("ucsc_ncbi_gene")
     pfam_raw = read_raw("ucsc_ncbi_gene_pfam")
+    gene_desc_lookup = {
+        r.name: clean_gene_description(r.html)
+        for r in read_raw("ucsc_gene_desc").itertuples(index=False)
+    }
 
     with engine.begin() as conn:
         genes = []
@@ -69,6 +86,7 @@ def main():
                 "cds_start": safe_int(r.cdsStart),
                 "cds_end": safe_int(r.cdsEnd),
                 "exon_count": safe_int(r.exonCount),
+                "description": gene_desc_lookup.get(r.name),
                 "source_id": ucsc_sid,
             })
         gene_ids = [
@@ -77,9 +95,9 @@ def main():
                     """
                     INSERT INTO core.gene
                         (sequence_id, gene_symbol, strand, start_pos, end_pos,
-                         cds_start, cds_end, exon_count, source_id)
+                         cds_start, cds_end, exon_count, description, source_id)
                     VALUES (:sequence_id, :gene_symbol, :strand, :start_pos, :end_pos,
-                            :cds_start, :cds_end, :exon_count, :source_id)
+                            :cds_start, :cds_end, :exon_count, :description, :source_id)
                     RETURNING gene_id
                     """
                 ),

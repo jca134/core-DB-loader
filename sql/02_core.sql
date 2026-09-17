@@ -58,7 +58,15 @@ CREATE TABLE IF NOT EXISTS core.isolate (
     collection_date     DATE,
     genome_status       TEXT,               -- e.g. Complete / Partial
     source_id           INTEGER REFERENCES core.source(source_id),
-    notes               TEXT
+    notes               TEXT,
+    -- Patient-level facts for isolates tied to a documented human case (currently
+    -- from LANL's hfv_ebola_annotation_web). One isolate = one case in that data,
+    -- so these live here rather than in a separate table (see hfv_ebola_annotation_web).
+    patient_outcome     TEXT,               -- LANL's single-letter code, e.g. 'd' (died), 's' (survived)
+    patient_age         TEXT,               -- free text in source, e.g. '28 yr', '8 mo'
+    patient_sex         TEXT,
+    symptom_onset_date  DATE,
+    death_date          DATE
 );
 
 CREATE TABLE IF NOT EXISTS core.sequence (
@@ -121,6 +129,7 @@ CREATE TABLE IF NOT EXISTS core.gene (
     cds_start     INTEGER,
     cds_end       INTEGER,
     exon_count    INTEGER,
+    description   TEXT,             -- from UCSC's geneDesc track
     source_id     INTEGER REFERENCES core.source(source_id)
 );
 
@@ -314,7 +323,9 @@ CREATE TABLE IF NOT EXISTS core.experiment_sample (
     experiment_accession  TEXT NOT NULL REFERENCES core.experiment(experiment_accession),
     biosample_accession   TEXT REFERENCES core.biosample(biosample_accession),
     name                  TEXT,
-    result_schema         TEXT
+    result_schema         TEXT,
+    repository_name       TEXT,   -- e.g. 'GEO' (from ImmPort's expsample_public_repository)
+    repository_accession  TEXT    -- e.g. GEO GSM accession
 );
 
 CREATE TABLE IF NOT EXISTS core.protocol (
@@ -361,17 +372,19 @@ CREATE TABLE IF NOT EXISTS core.biosample_treatment (
 );
 
 CREATE TABLE IF NOT EXISTS core.immune_exposure (
-    exposure_accession           TEXT PRIMARY KEY,
-    arm_accession                TEXT NOT NULL REFERENCES core.study_arm(arm_accession),
-    subject_accession            TEXT REFERENCES core.subject(subject_accession),
-    exposure_process_reported    TEXT,
-    exposure_process_preferred   TEXT,
-    exposure_material_reported   TEXT,
-    exposure_material_preferred  TEXT,
-    disease_reported             TEXT,
-    disease_preferred            TEXT,
-    disease_stage_reported       TEXT,
-    disease_stage_preferred      TEXT
+    exposure_accession            TEXT PRIMARY KEY,
+    arm_accession                 TEXT NOT NULL REFERENCES core.study_arm(arm_accession),
+    subject_accession             TEXT REFERENCES core.subject(subject_accession),
+    exposure_process_reported     TEXT,
+    exposure_process_preferred    TEXT,
+    exposure_material_reported    TEXT,
+    exposure_material_preferred   TEXT,
+    exposure_material_ontology_id TEXT,  -- e.g. Vaccine Ontology id, 'VO:0004660'
+    disease_reported              TEXT,
+    disease_preferred             TEXT,
+    disease_ontology_id           TEXT,  -- e.g. Disease Ontology id, 'DOID:4325'
+    disease_stage_reported        TEXT,
+    disease_stage_preferred       TEXT
 );
 
 -- Not populated yet — see etl_immport.py header for why.
