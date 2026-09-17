@@ -1,0 +1,574 @@
+"""
+Populates the sequence/feature/protein/structure/epitope/antibody/alignment
+half of `core` from raw.bvbrc_*, raw.ncbi_sequences, and raw.hfv_* (loaded by
+load_bvbrc.py / load_ncbi.py / load_hfv.py).
+
+Entity resolution is accession-driven, not fuzzy: proteins link to
+structures/epitopes by exact id match (feature_id, protein_id,
+uniprotkb_accession), and LANL alignment members link to a sequence by
+parsing the GenBank accession off the tail of their strain label (e.g.
+".../Yambuku-Mayinga/NC_002549" -> NC_002549) and matching it against a
+recorded xref. Anything that doesn't resolve is left NULL rather than guessed.
+
+External accessions all go through core.xref (see sql/02_core.sql) so adding
+a new source's identifiers never requires a schema migration.
+
+core.variant / core.variant_effect / core.genomic_interval are left empty —
+the UCSC tables that would feed them (gire2014*, spMut, ...) are external
+bigBed/VCF pointer tracks with no row data in this download (see
+load_ucsc.py).
+
+Safe to re-run: truncates its own core tables (and its slice of core.xref)
+first.
+"""
+
+import itertools
+from dataclasses import dataclass, field
+
+import pandas as pd
+
+from core_data_loader.common.etl_common import (
+    engine, ensure_sources, truncate, read_raw,
+    safe_int, safe_float, safe_date, blank_to_none,
+    add_xref, write_xref,
+    add_provenance, write_provenance,
+)
+
+BVBRC = "bvbrc"
+NCBI = "ncbi"
+HFV = "hfv_lanl"
+
+NEUTRALIZING_TRUE = {"y", "yes", "true", "1"}
+
+ENTITY_TYPES_OWNED = ["isolate", "sequence", "protein", "epitope", "antibody"]
+
+PROVENANCE_TABLES_OWNED = [
+    "taxon", "isolate", "sequence", "feature", "protein",
+    "structure", "epitope", "antibody", "alignment_member",
+]
+
+
+def _counter():
+    return itertools.count(1)
+
+
+@dataclass
+class BuildContext:
+    """
+    State threaded through the build_* steps below: id counters, the
+    cross-reference lookup dicts each step needs from earlier steps, and the
+    accumulator lists (epitope/epitope_assay/antibody_epitope/xref) that more
+    than one step appends to before a single final write.
+    """
+
+    bvbrc_sid: int
+    ncbi_sid: int
+    hfv_sid: int
+
+    taxon_ids_present: set = field(default_factory=set)
+
+    genome_id_to_isolate: dict = field(default_factory=dict)
+    ncbi_accession_to_isolate: dict = field(default_factory=dict)
+
+    accession_to_sequence: dict = field(default_factory=dict)   # genbank accession -> core.sequence_id
+    sequence_to_isolate: dict = field(default_factory=dict)     # core.sequence_id -> core.isolate_id
+    raw_seqid_to_sequence: dict = field(default_factory=dict)   # bvbrc genome_sequence.sequence_id (text) -> core.sequence_id
+
+    raw_featureid_to_protein: dict = field(default_factory=dict)
+    ncbi_protein_id_to_protein: dict = field(default_factory=dict)
+    patric_id_to_protein: dict = field(default_factory=dict)
+    uniprot_to_protein: dict = field(default_factory=dict)
+
+    hfv_epitope_lookup: dict = field(default_factory=dict)  # (protein, sequence) -> epitope_id
+
+    epitope_rows: list = field(default_factory=list)
+    epitope_assay_rows: list = field(default_factory=list)
+    antibody_epitope_rows: list = field(default_factory=list)
+    xref_rows: list = field(default_factory=list)
+    provenance_rows: list = field(default_factory=list)
+
+    isolate_id_seq: itertools.count = field(default_factory=_counter)
+    sequence_id_seq: itertools.count = field(default_factory=_counter)
+    feature_id_seq: itertools.count = field(default_factory=_counter)
+    protein_id_seq: itertools.count = field(default_factory=_counter)
+    structure_id_seq: itertools.count = field(default_factory=_counter)
+    epitope_id_seq: itertools.count = field(default_factory=_counter)
+    antibody_id_seq: itertools.count = field(default_factory=_counter)
+    alignment_id_seq: itertools.count = field(default_factory=_counter)
+    alignment_member_id_seq: itertools.count = field(default_factory=_counter)
+
+    def resolve_protein(self, ncbi_protein_id=None, patric_id=None, uniprot_accession=None):
+        for key, table in (
+            (ncbi_protein_id, self.ncbi_protein_id_to_protein),
+            (patric_id, self.patric_id_to_protein),
+            (uniprot_accession, self.uniprot_to_protein),
+        ):
+            key = blank_to_none(key)
+            if key and key in table:
+                return table[key]
+        return None
+
+    def get_or_create_hfv_epitope(self, protein, seq, epitope_type,
+                                   host_species=None, organism=None, iedb_id=None,
+                                   raw_table=None, raw_pk=None):
+        key = (blank_to_none(protein), blank_to_none(seq))
+        if key in self.hfv_epitope_lookup:
+            return self.hfv_epitope_lookup[key]
+        eid = next(self.epitope_id_seq)
+        self.epitope_rows.append({
+            "epitope_id": eid,
+            "protein_id": None,
+            "epitope_sequence": blank_to_none(seq),
+            "start": None,
+            "end": None,
+            "epitope_type": epitope_type,
+            "host_species": host_species,
+            "organism": organism,
+            "taxon_id": None,  # no bvbrc taxonomy resolution attempted for hfv-sourced epitopes
+            "source_id": self.hfv_sid,
+        })
+        add_xref(self.xref_rows, "epitope", eid, self.hfv_sid, "iedb_id", iedb_id)
+        # raw_table/raw_pk describe whichever raw row first minted this
+        # epitope; a later dedup hit against the same key isn't re-recorded.
+        if raw_table is not None:
+            add_provenance(self.provenance_rows, "epitope", eid, self.hfv_sid, raw_table, raw_pk)
+        self.hfv_epitope_lookup[key] = eid
+        return eid
+
+
+def _write(df: pd.DataFrame, table: str, note: str = "") -> pd.DataFrame:
+    df.to_sql(table, engine, schema="core", if_exists="append", index=False)
+    print(f"core.{table}: {len(df)} rows{note}")
+    return df
+
+
+def build_taxon(ctx: BuildContext) -> pd.DataFrame:
+    taxonomy = read_raw("bvbrc_taxonomy")
+    ctx.taxon_ids_present = set(taxonomy["taxon_id"].map(safe_int).dropna())
+
+    def parent_if_present(v):
+        pid = safe_int(v)
+        return pid if pid in ctx.taxon_ids_present else None
+
+    taxon_df = pd.DataFrame({
+        "taxon_id": taxonomy["taxon_id"].map(safe_int),
+        "taxon_name": taxonomy["taxon_name"],
+        "taxon_rank": taxonomy["taxon_rank"],
+        "genetic_code": taxonomy["genetic_code"].map(safe_int),
+        "lineage": taxonomy["lineage"],
+        "parent_id": taxonomy["parent_id"].map(parent_if_present),
+        "source_id": ctx.bvbrc_sid,
+    }).dropna(subset=["taxon_id"])
+
+    for taxon_id in taxon_df["taxon_id"]:
+        add_provenance(ctx.provenance_rows, "taxon", taxon_id, ctx.bvbrc_sid, "bvbrc_taxonomy", taxon_id)
+
+    return taxon_df
+
+
+def build_isolates(ctx: BuildContext, genome: pd.DataFrame, ncbi: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+
+    for r in genome.itertuples(index=False):
+        iid = next(ctx.isolate_id_seq)
+        ctx.genome_id_to_isolate[r.genome_id] = iid
+        rows.append({
+            "isolate_id": iid,
+            "taxon_id": safe_int(r.taxon_id) if safe_int(r.taxon_id) in ctx.taxon_ids_present else None,
+            "primary_strain_name": r.genome_name,
+            "lanl_strain_name": None,
+            "species": r.species,
+            "country": None,
+            "geo_location": None,
+            "host": r.host_common_name,
+            "tissue_specimen_source": None,
+            "collection_date": None,
+            "genome_status": r.genome_status,
+            "source_id": ctx.bvbrc_sid,
+            "notes": None,
+        })
+        add_xref(ctx.xref_rows, "isolate", iid, ctx.bvbrc_sid, "bvbrc_genome_id", r.genome_id)
+        add_provenance(ctx.provenance_rows, "isolate", iid, ctx.bvbrc_sid, "bvbrc_genome", r.genome_id)
+
+    for r in ncbi.itertuples(index=False):
+        iid = next(ctx.isolate_id_seq)
+        ctx.ncbi_accession_to_isolate[r.accession] = iid
+        rows.append({
+            "isolate_id": iid,
+            "taxon_id": None,  # ncbi's taxon ids aren't in the bvbrc taxonomy set, so nothing to resolve against
+            "primary_strain_name": r.organism_name,
+            "lanl_strain_name": None,
+            "species": r.species,
+            "country": r.country,
+            "geo_location": blank_to_none(r.geo_location),
+            "host": r.host,
+            "tissue_specimen_source": blank_to_none(r.tissue_specimen_source),
+            "collection_date": safe_date(r.collection_date),
+            "genome_status": r.nuc_completeness,
+            "source_id": ctx.ncbi_sid,
+            "notes": blank_to_none(r.isolate),
+        })
+        add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_isolate_designation", r.isolate)
+        add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_assembly", r.assembly)
+        add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_sra_accession", r.sra_accession)
+        add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_biosample", r.biosample)
+        add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_bioproject", r.bioproject)
+        add_provenance(ctx.provenance_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_sequences", r.accession)
+
+    return pd.DataFrame(rows)
+
+
+def build_sequences(ctx: BuildContext, genome_sequence: pd.DataFrame, ncbi: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+
+    for r in genome_sequence.itertuples(index=False):
+        sid = next(ctx.sequence_id_seq)
+        ctx.raw_seqid_to_sequence[r.sequence_id] = sid
+        isolate_id = ctx.genome_id_to_isolate.get(r.genome_id)
+        ctx.sequence_to_isolate[sid] = isolate_id
+        acc = blank_to_none(r.accession)
+        if acc:
+            ctx.accession_to_sequence.setdefault(acc, sid)
+        add_xref(ctx.xref_rows, "sequence", sid, ctx.bvbrc_sid, "genbank_accession", acc)
+        add_provenance(ctx.provenance_rows, "sequence", sid, ctx.bvbrc_sid, "bvbrc_genome_sequence", r.sequence_id)
+        rows.append({
+            "sequence_id": sid,
+            "isolate_id": isolate_id,
+            "molecule_type": None,
+            "sequence_type": r.sequence_type,
+            "segment": r.topology,
+            "length": safe_int(r.length),
+            "sequence_text": blank_to_none(r.sequence),
+            "sequence_md5": r.sequence_md5,
+            "is_reference": False,
+            "release_date": None,
+            "source_id": ctx.bvbrc_sid,
+        })
+
+    for r in ncbi.itertuples(index=False):
+        sid = next(ctx.sequence_id_seq)
+        acc = blank_to_none(r.accession)
+        isolate_id = ctx.ncbi_accession_to_isolate.get(r.accession)
+        ctx.sequence_to_isolate[sid] = isolate_id
+        if acc:
+            ctx.accession_to_sequence.setdefault(acc, sid)
+        add_xref(ctx.xref_rows, "sequence", sid, ctx.ncbi_sid, "genbank_accession", acc)
+        add_provenance(ctx.provenance_rows, "sequence", sid, ctx.ncbi_sid, "ncbi_sequences", r.accession)
+        rows.append({
+            "sequence_id": sid,
+            "isolate_id": isolate_id,
+            "molecule_type": r.molecule_type,
+            "sequence_type": "genomic",
+            "segment": blank_to_none(r.segment),
+            "length": safe_int(r.length),
+            "sequence_text": None,  # sequences.csv is metadata-only, no raw sequence text
+            "sequence_md5": None,
+            "is_reference": False,
+            "release_date": safe_date(r.release_date),
+            "source_id": ctx.ncbi_sid,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def build_features_and_proteins(ctx: BuildContext, genome_feature: pd.DataFrame):
+    feature_rows = []
+    protein_rows = []
+
+    for r in genome_feature.itertuples(index=False):
+        fid = next(ctx.feature_id_seq)
+        feature_rows.append({
+            "feature_id": fid,
+            "sequence_id": ctx.raw_seqid_to_sequence.get(r.sequence_id),
+            "feature_type": r.feature_type,
+            "start": safe_int(r.start),
+            "end": safe_int(r.end),
+            "strand": r.strand,
+            "gene": blank_to_none(r.gene),
+            "product": r.product,
+            "annotation": r.annotation,
+            "source_id": ctx.bvbrc_sid,
+        })
+        add_provenance(ctx.provenance_rows, "feature", fid, ctx.bvbrc_sid, "bvbrc_genome_feature", r.feature_id)
+
+        aa_len = safe_int(r.aa_length)
+        if aa_len is None:
+            continue  # not a protein-coding feature (e.g. UTR, tRNA) — no protein row for it
+
+        pid = next(ctx.protein_id_seq)
+        ctx.raw_featureid_to_protein[r.feature_id] = pid
+        add_provenance(ctx.provenance_rows, "protein", pid, ctx.bvbrc_sid, "bvbrc_genome_feature", r.feature_id)
+        protein_rows.append({
+            "protein_id": pid,
+            "feature_id": fid,
+            "sequence_text": None,  # aa sequence isn't carried in genome_feature, only md5/length
+            "aa_length": aa_len,
+            "product": r.product,
+            "gene": blank_to_none(r.gene),
+            "source_id": ctx.bvbrc_sid,
+        })
+
+        ncbi_prot = blank_to_none(r.protein_id)
+        if ncbi_prot:
+            ctx.ncbi_protein_id_to_protein[ncbi_prot] = pid
+        add_xref(ctx.xref_rows, "protein", pid, ctx.bvbrc_sid, "ncbi_protein_id", ncbi_prot)
+
+        patric_id = blank_to_none(r.patric_id)
+        if patric_id:
+            ctx.patric_id_to_protein[patric_id] = pid
+        add_xref(ctx.xref_rows, "protein", pid, ctx.bvbrc_sid, "patric_id", patric_id)
+
+        add_xref(ctx.xref_rows, "protein", pid, ctx.bvbrc_sid, "refseq_locus_tag", r.refseq_locus_tag)
+
+    return pd.DataFrame(feature_rows), pd.DataFrame(protein_rows)
+
+
+def build_structures(ctx: BuildContext, protein_structure: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for r in protein_structure.itertuples(index=False):
+        protein_id = ctx.raw_featureid_to_protein.get(blank_to_none(r.feature_id))
+
+        # uniprotkb_accession can hold several accessions joined by "|"
+        # (one per chain in a multi-chain PDB entry) — record each as its
+        # own xref rather than one glued-together value
+        uniprot_raw = blank_to_none(r.uniprotkb_accession)
+        uniprot_ids = [u for u in (p.strip() for p in uniprot_raw.split("|"))] if uniprot_raw else []
+        uniprot_ids = [u for u in uniprot_ids if u]
+
+        if protein_id is None:
+            for u in uniprot_ids:
+                if u in ctx.uniprot_to_protein:
+                    protein_id = ctx.uniprot_to_protein[u]
+                    break
+
+        if protein_id is not None:
+            for u in uniprot_ids:
+                if u not in ctx.uniprot_to_protein:
+                    ctx.uniprot_to_protein[u] = protein_id
+                    add_xref(ctx.xref_rows, "protein", protein_id, ctx.bvbrc_sid, "uniprotkb_accession", u)
+
+        taxon_id = safe_int(r.taxon_id)
+        structure_id = next(ctx.structure_id_seq)
+        rows.append({
+            "structure_id": structure_id,
+            "protein_id": protein_id,
+            "pdb_id": r.pdb_id,
+            "resolution": safe_float(r.resolution),
+            "method": r.method,
+            "title": r.title,
+            "release_date": safe_date(r.release_date),
+            "organism_name": r.organism_name,
+            "taxon_id": taxon_id if taxon_id in ctx.taxon_ids_present else None,
+            "source_id": ctx.bvbrc_sid,
+        })
+        add_provenance(ctx.provenance_rows, "structure", structure_id, ctx.bvbrc_sid,
+                        "bvbrc_protein_structure", r.pdb_id)
+    return pd.DataFrame(rows)
+
+
+def build_bvbrc_epitopes(ctx: BuildContext, epitope: pd.DataFrame):
+    """Appends to ctx.epitope_rows / ctx.epitope_assay_rows / ctx.xref_rows."""
+    for r in epitope.itertuples(index=False):
+        eid = next(ctx.epitope_id_seq)
+        protein_id = ctx.resolve_protein(ncbi_protein_id=r.protein_id, uniprot_accession=r.protein_accession)
+        epitope_taxon_id = safe_int(r.taxon_id)
+        ctx.epitope_rows.append({
+            "epitope_id": eid,
+            "protein_id": protein_id,
+            "epitope_sequence": r.epitope_sequence,
+            "start": safe_int(r.start),
+            "end": safe_int(r.end),
+            "epitope_type": r.epitope_type,
+            "host_species": r.host_name,
+            "organism": r.organism,
+            "taxon_id": epitope_taxon_id if epitope_taxon_id in ctx.taxon_ids_present else None,
+            "source_id": ctx.bvbrc_sid,
+        })
+        add_xref(ctx.xref_rows, "epitope", eid, ctx.bvbrc_sid, "bvbrc_epitope_id", r.epitope_id)
+        add_provenance(ctx.provenance_rows, "epitope", eid, ctx.bvbrc_sid, "bvbrc_epitope", r.epitope_id)
+
+        for count_val, assay_type in (
+            (r.bcell_assays, "B cell"),
+            (r.tcell_assays, "T cell"),
+            (r.mhc_assays, "MHC binding"),
+        ):
+            # these columns hold "positive/total" strings (e.g. "4/4", "7/33"),
+            # not plain counts, so total_assays comes from the denominator
+            raw_val = blank_to_none(count_val)
+            if not raw_val:
+                continue
+            total = safe_int(raw_val.split("/")[-1]) if "/" in raw_val else safe_int(raw_val)
+            ctx.epitope_assay_rows.append({
+                "epitope_id": eid,
+                "assay_type": assay_type,
+                "mhc_allele": None,
+                "host_species": r.host_name,
+                "assay_outcome": raw_val,
+                "total_assays": total,
+                "pmid": None,
+                "source_id": ctx.bvbrc_sid,
+            })
+
+
+def build_antibodies(ctx: BuildContext, antibody: pd.DataFrame) -> pd.DataFrame:
+    """Appends hfv-derived epitope rows + antibody_epitope_rows + xrefs as a side effect."""
+    rows = []
+    for r in antibody.itertuples(index=False):
+        aid = next(ctx.antibody_id_seq)
+        neut_raw = blank_to_none(r.neutralizing)
+        rows.append({
+            "antibody_id": aid,
+            "name": r.antibody_name,
+            "alias": blank_to_none(r.alias),
+            "isotype": blank_to_none(r.isotype),
+            "isolation_host": blank_to_none(r.isolation_host),
+            "neutralizing": (neut_raw.lower() in NEUTRALIZING_TRUE) if neut_raw else None,
+            "donor_outcome": blank_to_none(r.donor_outcome),
+            "immunogen": blank_to_none(r.immunogen),
+            "source_id": ctx.hfv_sid,
+        })
+        add_xref(ctx.xref_rows, "antibody", aid, ctx.hfv_sid, "iedb_id", r.iedb_id)
+        add_provenance(ctx.provenance_rows, "antibody", aid, ctx.hfv_sid, "hfv_ebola_antibody", r.iedb_id)
+
+        if blank_to_none(r.epitope_location_sequence) or blank_to_none(r.protein):
+            eid = ctx.get_or_create_hfv_epitope(
+                r.protein, r.epitope_location_sequence, blank_to_none(r.epitope_type),
+                iedb_id=r.iedb_id,
+                raw_table="hfv_ebola_antibody", raw_pk=r.iedb_id,
+            )
+            ctx.antibody_epitope_rows.append({
+                "antibody_id": aid,
+                "epitope_id": eid,
+                "protein_id": None,
+                "binding_comment": blank_to_none(r.epitope_and_binding_comment),
+            })
+
+    return pd.DataFrame(rows)
+
+
+def build_ctl_assays(ctx: BuildContext, ctl: pd.DataFrame):
+    """Appends T-cell epitope_assay rows (+ hfv-derived epitope rows as needed)."""
+    for r in ctl.itertuples(index=False):
+        if not blank_to_none(r.peptide):
+            continue
+        eid = ctx.get_or_create_hfv_epitope(
+            r.protein, r.peptide, "Linear peptide",
+            host_species=blank_to_none(r.host_species_mouse_mus_musculus),
+            organism=blank_to_none(r.species),
+            iedb_id=r.iedb_id,
+            raw_table="hfv_ebola_ctl", raw_pk=r.iedb_id,
+        )
+        ctx.epitope_assay_rows.append({
+            "epitope_id": eid,
+            "assay_type": "T cell",
+            "mhc_allele": blank_to_none(r.hla) or blank_to_none(r.mhc),
+            "host_species": blank_to_none(r.host_species_mouse_mus_musculus),
+            "assay_outcome": blank_to_none(r.assay) or blank_to_none(r.predicted),
+            "total_assays": None,
+            "pmid": blank_to_none(r.pmid),
+            "source_id": ctx.hfv_sid,
+        })
+
+
+ALIGNMENT_FILES = [("F15AG1", "hfv_f15ag1"), ("F15OG1", "hfv_f15og1"), ("F15RG1", "hfv_f15rg1")]
+
+
+def build_alignments(ctx: BuildContext):
+    alignment_rows = []
+    member_rows = []
+
+    for name, table in ALIGNMENT_FILES:
+        aln_id = next(ctx.alignment_id_seq)
+        alignment_rows.append({
+            "alignment_id": aln_id,
+            "name": name,
+            "alignment_type": "multiple sequence alignment",
+            "method": "LANL HFV curated alignment",
+            "source_id": ctx.hfv_sid,
+        })
+        for order, r in enumerate(read_raw(table).itertuples(index=False)):
+            # strain_label ends in a GenBank accession, e.g.
+            # ".../Yambuku-Mayinga/NC_002549" -> "NC_002549"
+            accession = r.strain_label.rsplit("/", 1)[-1] if r.strain_label else None
+            seq_id = ctx.accession_to_sequence.get(accession) if accession else None
+            isolate_id = ctx.sequence_to_isolate.get(seq_id) if seq_id is not None else None
+            member_id = next(ctx.alignment_member_id_seq)
+            member_rows.append({
+                "alignment_member_id": member_id,
+                "alignment_id": aln_id,
+                "sequence_id": seq_id,
+                "isolate_id": isolate_id,
+                "strain_label": r.strain_label,
+                "aligned_sequence": r.aligned_sequence,
+                "row_order": order,
+            })
+            add_provenance(ctx.provenance_rows, "alignment_member", member_id, ctx.hfv_sid, table, r.strain_label)
+
+    return pd.DataFrame(alignment_rows), pd.DataFrame(member_rows)
+
+
+def main():
+    source_ids = ensure_sources()
+    ctx = BuildContext(
+        bvbrc_sid=source_ids[BVBRC],
+        ncbi_sid=source_ids[NCBI],
+        hfv_sid=source_ids[HFV],
+    )
+
+    truncate(
+        "core.alignment_member", "core.alignment",
+        "core.antibody_epitope", "core.antibody",
+        "core.epitope_assay", "core.epitope",
+        "core.structure",
+        "core.protein",
+        "core.feature_segment", "core.feature",
+        "core.sequence",
+        "core.isolate", "core.taxon",
+    )
+
+    _write(build_taxon(ctx), "taxon")
+
+    genome = read_raw("bvbrc_genome")
+    ncbi = read_raw("ncbi_sequences")
+    isolate_df = build_isolates(ctx, genome, ncbi)
+    _write(isolate_df, "isolate", f" ({len(ctx.genome_id_to_isolate)} bvbrc, {len(ctx.ncbi_accession_to_isolate)} ncbi)")
+
+    genome_sequence = read_raw("bvbrc_genome_sequence")
+    _write(build_sequences(ctx, genome_sequence, ncbi), "sequence")
+
+    genome_feature = read_raw("bvbrc_genome_feature")
+    feature_df, protein_df = build_features_and_proteins(ctx, genome_feature)
+    _write(feature_df, "feature")
+    _write(protein_df, "protein", f" ({len(ctx.raw_featureid_to_protein)} CDS/protein-coding)")
+
+    protein_structure = read_raw("bvbrc_protein_structure")
+    _write(build_structures(ctx, protein_structure), "structure")
+
+    epitope_df = read_raw("bvbrc_epitope")
+    build_bvbrc_epitopes(ctx, epitope_df)
+
+    antibody = read_raw("hfv_ebola_antibody")
+    antibody_df = build_antibodies(ctx, antibody)
+    _write(antibody_df, "antibody")
+
+    ctl = read_raw("hfv_ebola_ctl")
+    build_ctl_assays(ctx, ctl)
+
+    _write(pd.DataFrame(ctx.epitope_rows), "epitope", f" ({len(ctx.hfv_epitope_lookup)} from hfv)")
+    _write(pd.DataFrame(ctx.epitope_assay_rows), "epitope_assay")
+    _write(pd.DataFrame(ctx.antibody_epitope_rows), "antibody_epitope")
+
+    alignment_df, alignment_member_df = build_alignments(ctx)
+    _write(alignment_df, "alignment")
+    member_df = _write(alignment_member_df, "alignment_member")
+    matched = member_df["sequence_id"].notna().sum()
+    print(f"  ({matched} matched to a core.sequence)")
+
+    write_xref(ctx.xref_rows, ENTITY_TYPES_OWNED)
+    write_provenance(ctx.provenance_rows, PROVENANCE_TABLES_OWNED)
+
+    print("Finished BV-BRC/NCBI/HFV core ETL.")
+
+
+if __name__ == "__main__":
+    main()

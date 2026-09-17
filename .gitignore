@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+.idea/
+
+# CSVs (raw source data and generated profiling output) are not versioned.
+*.csv
+
+# Source data downloads and the SerenQA overview doc — not versioned.
+data/
+Overview/
