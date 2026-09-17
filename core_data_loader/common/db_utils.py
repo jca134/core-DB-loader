@@ -1,3 +1,4 @@
+import getpass
 import hashlib
 import os
 import re
@@ -5,9 +6,13 @@ from datetime import datetime
 
 from sqlalchemy import create_engine
 
+# Matches the README's documented default of
+# postgresql+psycopg2://$(whoami)@localhost:5432/filovirus -- resolved from
+# the current OS user rather than hardcoded, so this works for whoever's
+# running it, not just the machine it was written on.
 DB_URL = os.environ.get(
     "FILOVIRUS_DB_URL",
-    "postgresql+psycopg2://jadenaguilon@localhost:5432/filovirus",
+    f"postgresql+psycopg2://{getpass.getuser()}@localhost:5432/filovirus",
 )
 
 engine = create_engine(DB_URL)
