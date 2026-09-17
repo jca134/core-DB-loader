@@ -586,7 +586,7 @@ def main():
         "core.epitope_assay", "core.epitope",
         "core.structure",
         "core.protein",
-        "core.feature_segment", "core.feature",
+        "core.feature",
         "core.sequence",
         "core.isolate", "core.taxon",
     )

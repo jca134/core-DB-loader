@@ -96,14 +96,6 @@ CREATE TABLE IF NOT EXISTS core.feature (
     source_id         INTEGER REFERENCES core.source(source_id)
 );
 
-CREATE TABLE IF NOT EXISTS core.feature_segment (
-    feature_segment_id BIGSERIAL PRIMARY KEY,
-    feature_id         BIGINT NOT NULL REFERENCES core.feature(feature_id),
-    segment_order       INTEGER NOT NULL,
-    start_pos           INTEGER,
-    end_pos             INTEGER
-);
-
 CREATE TABLE IF NOT EXISTS core.protein (
     protein_id      BIGSERIAL PRIMARY KEY,
     feature_id      BIGINT REFERENCES core.feature(feature_id),
@@ -222,38 +214,6 @@ CREATE TABLE IF NOT EXISTS core.alignment_member (
     strain_label        TEXT,
     aligned_sequence    TEXT,
     row_order           INTEGER
-);
-
--- Not populated yet — see etl_bvbrc_hfv.py header for why.
-CREATE TABLE IF NOT EXISTS core.genomic_interval (
-    genomic_interval_id BIGSERIAL PRIMARY KEY,
-    sequence_id         BIGINT REFERENCES core.sequence(sequence_id),
-    start_pos           INTEGER,
-    end_pos             INTEGER,
-    interval_type       TEXT,
-    score               NUMERIC,
-    source_id           INTEGER REFERENCES core.source(source_id)
-);
-
-CREATE TABLE IF NOT EXISTS core.variant (
-    variant_id      BIGSERIAL PRIMARY KEY,
-    sequence_id     BIGINT REFERENCES core.sequence(sequence_id),
-    position        INTEGER,
-    ref_allele      TEXT,
-    alt_allele      TEXT,
-    variant_type    TEXT,
-    source_id       INTEGER REFERENCES core.source(source_id)
-);
-
-CREATE TABLE IF NOT EXISTS core.variant_effect (
-    variant_effect_id BIGSERIAL PRIMARY KEY,
-    variant_id         BIGINT NOT NULL REFERENCES core.variant(variant_id),
-    feature_id         BIGINT REFERENCES core.feature(feature_id),
-    protein_id         BIGINT REFERENCES core.protein(protein_id),
-    effect_type        TEXT,
-    aa_change          TEXT,
-    notes              TEXT,
-    source_id          INTEGER REFERENCES core.source(source_id)
 );
 
 CREATE TABLE IF NOT EXISTS core.study (
@@ -387,7 +347,9 @@ CREATE TABLE IF NOT EXISTS core.immune_exposure (
     disease_stage_preferred       TEXT
 );
 
--- Not populated yet — see etl_immport.py header for why.
+-- Not populated yet: ImmPort's per-analyte lab/assay result files (e.g. ELISA,
+-- titer readouts) aren't loaded by load_immport.py yet, so etl_immport.py has
+-- nothing to write here. Kept because that data is a known, concrete gap.
 CREATE TABLE IF NOT EXISTS core.assay_result (
     result_id                   BIGSERIAL PRIMARY KEY,
     result_type                 TEXT NOT NULL,
