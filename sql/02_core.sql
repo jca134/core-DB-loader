@@ -314,6 +314,17 @@ CREATE TABLE IF NOT EXISTS core.study_condition (
     PRIMARY KEY (study_accession, condition_id)
 );
 
+-- Curated, hand-seeded knowledge linking a virus taxon to the disease(s) it
+-- causes (e.g. Zaire ebolavirus 186538 -> Ebola hemorrhagic fever DOID:4325).
+-- Unlike every other core.* table, this isn't derived from a raw.* source --
+-- it's populated by core_data_loader.common.taxon_conditions after both
+-- core.taxon and core.condition already have rows (see etl_taxon_condition.py).
+CREATE TABLE IF NOT EXISTS core.taxon_condition (
+    taxon_id     INTEGER NOT NULL REFERENCES core.taxon(taxon_id),
+    condition_id BIGINT NOT NULL REFERENCES core.condition(condition_id),
+    PRIMARY KEY (taxon_id, condition_id)
+);
+
 CREATE TABLE IF NOT EXISTS core.treatment (
     treatment_accession TEXT PRIMARY KEY,
     name                TEXT,

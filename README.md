@@ -63,12 +63,21 @@ uv run python -m core_data_loader.etl.etl_immport
 uv run python -m core_data_loader.etl.etl_ucsc
 ```
 
+Then, once both `etl_bvbrc_hfv` and `etl_immport` have run, seed the curated
+taxon-to-disease mapping (`core.taxon_condition`, e.g. Zaire ebolavirus ->
+Ebola hemorrhagic fever):
+
+```bash
+uv run python -m core_data_loader.etl.etl_taxon_condition
+```
+
 ## Project layout
 
 | Path | Purpose |
 | --- | --- |
 | `core_data_loader/common/db_utils.py` | DB engine + shared value-parsing helpers, no schema knowledge |
 | `core_data_loader/common/sources.py` | Catalog of external datasets; upserts `core.source` rows |
+| `core_data_loader/common/taxon_conditions.py` | Curated taxon-to-disease mappings; upserts `core.taxon_condition` rows |
 | `core_data_loader/common/raw_common.py` | Shared helpers for `loaders/` (raw ingestion) |
 | `core_data_loader/common/etl_common.py` | Shared helpers for `etl/` (raw → core transforms) |
 | `core_data_loader/loaders/` | One script per source; loads raw files into `raw.<table>` |
