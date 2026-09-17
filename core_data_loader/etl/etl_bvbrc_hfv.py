@@ -1,4 +1,5 @@
 import itertools
+import re
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -16,6 +17,18 @@ NCBI = "ncbi"
 HFV = "hfv_lanl"
 
 NEUTRALIZING_TRUE = {"y", "yes", "true", "1"}
+
+# BV-BRC and NCBI both catalog many of the same public GenBank genomes, but
+# NCBI's accession is versioned ("KM034562.1") while BV-BRC's (and every
+# other source that references an accession — HFV, UCSC) is not
+# ("KM034562"). Stripping the version is what lets a genome reported by both
+# sources resolve to the same core.sequence/core.isolate instead of two.
+ACCESSION_VERSION_RE = re.compile(r"\.\d+$")
+
+
+def normalize_accession(acc):
+    acc = blank_to_none(acc)
+    return ACCESSION_VERSION_RE.sub("", acc) if acc else None
 
 ENTITY_TYPES_OWNED = ["isolate", "sequence", "feature", "protein", "epitope", "antibody"]
 
@@ -143,13 +156,31 @@ def build_taxon(ctx: BuildContext) -> pd.DataFrame:
     return taxon_df
 
 
-def build_isolates(ctx: BuildContext, genome: pd.DataFrame, ncbi: pd.DataFrame) -> pd.DataFrame:
-    rows = []
+def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome_sequence: pd.DataFrame,
+                                  ncbi: pd.DataFrame):
+    """
+    Builds core.isolate + core.sequence from BV-BRC (genome/genome_sequence)
+    and NCBI (sequences.csv) together, since deduping the two sources against
+    each other needs an isolate and its sequence's accession decided at once.
 
+    BV-BRC and NCBI both catalog many of the same public GenBank genomes —
+    about half of core.sequence, once accession versions are normalized.
+    Rather than inserting a second isolate/sequence for a genome BV-BRC
+    already has, an NCBI row whose accession matches an existing BV-BRC
+    sequence enriches that row instead of duplicating it: NCBI carries
+    isolate-level fields BV-BRC leaves null (country, geo_location,
+    collection_date, tissue_specimen_source) and sequence-level fields
+    BV-BRC leaves null (molecule_type, release_date). BV-BRC's own values
+    always win where both sources have one — NCBI only fills gaps.
+    """
+    isolate_by_id = {}
+    sequence_by_id = {}
+
+    # --- BV-BRC isolates (no earlier source to dedupe against) ---
     for r in genome.itertuples(index=False):
         iid = next(ctx.isolate_id_seq)
         ctx.genome_id_to_isolate[r.genome_id] = iid
-        rows.append({
+        isolate_by_id[iid] = {
             "isolate_id": iid,
             "taxon_id": safe_int(r.taxon_id) if safe_int(r.taxon_id) in ctx.taxon_ids_present else None,
             "primary_strain_name": r.genome_name,
@@ -163,14 +194,71 @@ def build_isolates(ctx: BuildContext, genome: pd.DataFrame, ncbi: pd.DataFrame) 
             "genome_status": r.genome_status,
             "source_id": ctx.bvbrc_sid,
             "notes": None,
-        })
+        }
         add_xref(ctx.xref_rows, "isolate", iid, ctx.bvbrc_sid, "bvbrc_genome_id", r.genome_id)
         add_provenance(ctx.provenance_rows, "isolate", iid, ctx.bvbrc_sid, "bvbrc_genome", r.genome_id)
 
+    # --- BV-BRC sequences (also establishes the accession -> sequence map NCBI dedupes against) ---
+    for r in genome_sequence.itertuples(index=False):
+        sid = next(ctx.sequence_id_seq)
+        ctx.raw_seqid_to_sequence[r.sequence_id] = sid
+        isolate_id = ctx.genome_id_to_isolate.get(r.genome_id)
+        ctx.sequence_to_isolate[sid] = isolate_id
+        acc = blank_to_none(r.accession)
+        norm_acc = normalize_accession(acc)
+        if norm_acc:
+            ctx.accession_to_sequence.setdefault(norm_acc, sid)
+        add_xref(ctx.xref_rows, "sequence", sid, ctx.bvbrc_sid, "genbank_accession", acc)
+        add_provenance(ctx.provenance_rows, "sequence", sid, ctx.bvbrc_sid, "bvbrc_genome_sequence", r.sequence_id)
+        sequence_by_id[sid] = {
+            "sequence_id": sid,
+            "isolate_id": isolate_id,
+            "molecule_type": None,
+            "sequence_type": r.sequence_type,
+            "segment": r.topology,
+            "length": safe_int(r.length),
+            "sequence_text": blank_to_none(r.sequence),
+            "sequence_md5": r.sequence_md5,
+            "is_reference": False,
+            "release_date": None,
+            "source_id": ctx.bvbrc_sid,
+        }
+
+    # --- NCBI: merge into a matching BV-BRC genome by accession, or add new ---
+    merged = 0
     for r in ncbi.itertuples(index=False):
+        acc = blank_to_none(r.accession)
+        norm_acc = normalize_accession(acc)
+        existing_sid = ctx.accession_to_sequence.get(norm_acc) if norm_acc else None
+        existing_iid = ctx.sequence_to_isolate.get(existing_sid) if existing_sid is not None else None
+
+        if existing_sid is not None and existing_iid is not None:
+            merged += 1
+            ctx.ncbi_accession_to_isolate[r.accession] = existing_iid
+
+            iso = isolate_by_id[existing_iid]
+            iso["country"] = iso["country"] or r.country
+            iso["geo_location"] = iso["geo_location"] or blank_to_none(r.geo_location)
+            iso["tissue_specimen_source"] = iso["tissue_specimen_source"] or blank_to_none(r.tissue_specimen_source)
+            iso["collection_date"] = iso["collection_date"] or safe_date(r.collection_date)
+            iso["notes"] = iso["notes"] or blank_to_none(r.isolate)
+            add_xref(ctx.xref_rows, "isolate", existing_iid, ctx.ncbi_sid, "ncbi_isolate_designation", r.isolate)
+            add_xref(ctx.xref_rows, "isolate", existing_iid, ctx.ncbi_sid, "ncbi_assembly", r.assembly)
+            add_xref(ctx.xref_rows, "isolate", existing_iid, ctx.ncbi_sid, "ncbi_sra_accession", r.sra_accession)
+            add_xref(ctx.xref_rows, "isolate", existing_iid, ctx.ncbi_sid, "ncbi_biosample", r.biosample)
+            add_xref(ctx.xref_rows, "isolate", existing_iid, ctx.ncbi_sid, "ncbi_bioproject", r.bioproject)
+            add_provenance(ctx.provenance_rows, "isolate", existing_iid, ctx.ncbi_sid, "ncbi_sequences", r.accession)
+
+            seq = sequence_by_id[existing_sid]
+            seq["molecule_type"] = seq["molecule_type"] or r.molecule_type
+            seq["release_date"] = seq["release_date"] or safe_date(r.release_date)
+            add_xref(ctx.xref_rows, "sequence", existing_sid, ctx.ncbi_sid, "genbank_accession", acc)
+            add_provenance(ctx.provenance_rows, "sequence", existing_sid, ctx.ncbi_sid, "ncbi_sequences", r.accession)
+            continue
+
         iid = next(ctx.isolate_id_seq)
         ctx.ncbi_accession_to_isolate[r.accession] = iid
-        rows.append({
+        isolate_by_id[iid] = {
             "isolate_id": iid,
             "taxon_id": None,  # ncbi's taxon ids aren't in the bvbrc taxonomy set, so nothing to resolve against
             "primary_strain_name": r.organism_name,
@@ -184,7 +272,7 @@ def build_isolates(ctx: BuildContext, genome: pd.DataFrame, ncbi: pd.DataFrame) 
             "genome_status": r.nuc_completeness,
             "source_id": ctx.ncbi_sid,
             "notes": blank_to_none(r.isolate),
-        })
+        }
         add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_isolate_designation", r.isolate)
         add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_assembly", r.assembly)
         add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_sra_accession", r.sra_accession)
@@ -192,48 +280,15 @@ def build_isolates(ctx: BuildContext, genome: pd.DataFrame, ncbi: pd.DataFrame) 
         add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_bioproject", r.bioproject)
         add_provenance(ctx.provenance_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_sequences", r.accession)
 
-    return pd.DataFrame(rows)
-
-
-def build_sequences(ctx: BuildContext, genome_sequence: pd.DataFrame, ncbi: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-
-    for r in genome_sequence.itertuples(index=False):
         sid = next(ctx.sequence_id_seq)
-        ctx.raw_seqid_to_sequence[r.sequence_id] = sid
-        isolate_id = ctx.genome_id_to_isolate.get(r.genome_id)
-        ctx.sequence_to_isolate[sid] = isolate_id
-        acc = blank_to_none(r.accession)
-        if acc:
-            ctx.accession_to_sequence.setdefault(acc, sid)
-        add_xref(ctx.xref_rows, "sequence", sid, ctx.bvbrc_sid, "genbank_accession", acc)
-        add_provenance(ctx.provenance_rows, "sequence", sid, ctx.bvbrc_sid, "bvbrc_genome_sequence", r.sequence_id)
-        rows.append({
-            "sequence_id": sid,
-            "isolate_id": isolate_id,
-            "molecule_type": None,
-            "sequence_type": r.sequence_type,
-            "segment": r.topology,
-            "length": safe_int(r.length),
-            "sequence_text": blank_to_none(r.sequence),
-            "sequence_md5": r.sequence_md5,
-            "is_reference": False,
-            "release_date": None,
-            "source_id": ctx.bvbrc_sid,
-        })
-
-    for r in ncbi.itertuples(index=False):
-        sid = next(ctx.sequence_id_seq)
-        acc = blank_to_none(r.accession)
-        isolate_id = ctx.ncbi_accession_to_isolate.get(r.accession)
-        ctx.sequence_to_isolate[sid] = isolate_id
-        if acc:
-            ctx.accession_to_sequence.setdefault(acc, sid)
+        ctx.sequence_to_isolate[sid] = iid
+        if norm_acc:
+            ctx.accession_to_sequence.setdefault(norm_acc, sid)
         add_xref(ctx.xref_rows, "sequence", sid, ctx.ncbi_sid, "genbank_accession", acc)
         add_provenance(ctx.provenance_rows, "sequence", sid, ctx.ncbi_sid, "ncbi_sequences", r.accession)
-        rows.append({
+        sequence_by_id[sid] = {
             "sequence_id": sid,
-            "isolate_id": isolate_id,
+            "isolate_id": iid,
             "molecule_type": r.molecule_type,
             "sequence_type": "genomic",
             "segment": blank_to_none(r.segment),
@@ -243,9 +298,10 @@ def build_sequences(ctx: BuildContext, genome_sequence: pd.DataFrame, ncbi: pd.D
             "is_reference": False,
             "release_date": safe_date(r.release_date),
             "source_id": ctx.ncbi_sid,
-        })
+        }
 
-    return pd.DataFrame(rows)
+    print(f"  ({merged} ncbi records merged into an existing bvbrc isolate/sequence by accession)")
+    return pd.DataFrame(isolate_by_id.values()), pd.DataFrame(sequence_by_id.values())
 
 
 def build_features_and_proteins(ctx: BuildContext, genome_feature: pd.DataFrame):
@@ -594,12 +650,11 @@ def main():
     _write(build_taxon(ctx), "taxon")
 
     genome = read_raw("bvbrc_genome")
-    ncbi = read_raw("ncbi_sequences")
-    isolate_df = build_isolates(ctx, genome, ncbi)
-    _write(isolate_df, "isolate", f" ({len(ctx.genome_id_to_isolate)} bvbrc, {len(ctx.ncbi_accession_to_isolate)} ncbi)")
-
     genome_sequence = read_raw("bvbrc_genome_sequence")
-    _write(build_sequences(ctx, genome_sequence, ncbi), "sequence")
+    ncbi = read_raw("ncbi_sequences")
+    isolate_df, sequence_df = build_isolates_and_sequences(ctx, genome, genome_sequence, ncbi)
+    _write(isolate_df, "isolate", f" ({len(genome)} bvbrc, {len(ncbi)} ncbi rows in)")
+    _write(sequence_df, "sequence")
 
     genome_feature = read_raw("bvbrc_genome_feature")
     feature_df, protein_df = build_features_and_proteins(ctx, genome_feature)
