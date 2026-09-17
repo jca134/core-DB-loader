@@ -12,7 +12,7 @@ from core_data_loader.common.sources import SOURCES, ensure_sources
 __all__ = [
     "engine", "blank_to_none", "safe_int", "safe_float", "safe_date", "clean_columns",
     "SOURCES", "ensure_sources",
-    "truncate", "read_raw", "raw_table_exists",
+    "truncate", "read_raw", "raw_table_exists", "write_core",
     "add_xref", "write_xref",
     "add_provenance", "write_provenance",
 ]
@@ -26,6 +26,14 @@ def truncate(*tables: str):
 
 def read_raw(table: str) -> pd.DataFrame:
     return pd.read_sql_table(table, engine, schema="raw")
+
+
+def write_core(df: pd.DataFrame, table: str, note: str = "") -> pd.DataFrame:
+    """Appends df to core.<table> and logs the row count -- the standard
+    last step of every build_*() in an etl_*.py script."""
+    df.to_sql(table, engine, schema="core", if_exists="append", index=False)
+    print(f"core.{table}: {len(df)} rows{note}")
+    return df
 
 
 def raw_table_exists(table: str) -> bool:

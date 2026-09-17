@@ -1,7 +1,7 @@
 import pandas as pd
 
 from core_data_loader.common.etl_common import (
-    engine, ensure_sources, truncate, read_raw, raw_table_exists,
+    engine, ensure_sources, truncate, read_raw, raw_table_exists, write_core,
     safe_int, safe_float, safe_date,
     add_provenance_bulk, write_provenance,
 )
@@ -55,9 +55,8 @@ def main():
         "actual_enrollment": study["actual_enrollment"].map(safe_int),
         "source_id": study["_source_id"],
     })
-    core_study.to_sql("study", engine, schema="core", if_exists="append", index=False)
+    write_core(core_study, "study")
     add_provenance_bulk(provenance_rows, study, "study", "study_accession")
-    print(f"core.study: {len(core_study)} rows")
 
     # study_arm
     arm = concat_tables("arm_or_cohort", source_ids)
@@ -69,9 +68,8 @@ def main():
         "type_reported": arm["type_reported"],
         "type_preferred": arm["type_preferred"],
     })
-    core_arm.to_sql("study_arm", engine, schema="core", if_exists="append", index=False)
+    write_core(core_arm, "study_arm")
     add_provenance_bulk(provenance_rows, arm, "study_arm", "arm_accession")
-    print(f"core.study_arm: {len(core_arm)} rows")
 
     # subject_accession is unique across all of ImmPort, not per-study, so
     # dedup across the concatenated studies before inserting
@@ -86,9 +84,8 @@ def main():
         "strain": subject["strain"],
         "source_id": subject["_source_id"],
     })
-    core_subject.to_sql("subject", engine, schema="core", if_exists="append", index=False)
+    write_core(core_subject, "subject")
     add_provenance_bulk(provenance_rows, subject, "subject", "subject_accession")
-    print(f"core.subject: {len(core_subject)} rows")
 
     # study_arm_subject
     a2s = concat_tables("arm_2_subject", source_ids)
@@ -101,8 +98,7 @@ def main():
         "age_unit": a2s["age_unit"],
     })
     core_a2s = core_a2s.drop_duplicates(subset=["arm_accession", "subject_accession"])
-    core_a2s.to_sql("study_arm_subject", engine, schema="core", if_exists="append", index=False)
-    print(f"core.study_arm_subject: {len(core_a2s)} rows")
+    write_core(core_a2s, "study_arm_subject")
 
     # biosample
     biosample = concat_tables("biosample", source_ids)
@@ -118,9 +114,8 @@ def main():
         "study_time_t0_event": biosample["study_time_t0_event"],
         "source_id": biosample["_source_id"],
     })
-    core_biosample.to_sql("biosample", engine, schema="core", if_exists="append", index=False)
+    write_core(core_biosample, "biosample")
     add_provenance_bulk(provenance_rows, biosample, "biosample", "biosample_accession")
-    print(f"core.biosample: {len(core_biosample)} rows")
 
     # experiment
     experiment = concat_tables("experiment", source_ids)
@@ -132,9 +127,8 @@ def main():
         "description": experiment["description"],
         "source_id": experiment["_source_id"],
     })
-    core_experiment.to_sql("experiment", engine, schema="core", if_exists="append", index=False)
+    write_core(core_experiment, "experiment")
     add_provenance_bulk(provenance_rows, experiment, "experiment", "experiment_accession")
-    print(f"core.experiment: {len(core_experiment)} rows")
 
     # experiment_sample (expsample joined to its biosample link, and to its
     # public-repository accession if it has one — e.g. a GEO GSM id)
@@ -169,9 +163,8 @@ def main():
         "repository_name": expsample["repository_name"],
         "repository_accession": expsample["repository_accession"],
     })
-    core_expsample.to_sql("experiment_sample", engine, schema="core", if_exists="append", index=False)
+    write_core(core_expsample, "experiment_sample")
     add_provenance_bulk(provenance_rows, expsample, "experiment_sample", "expsample_accession")
-    print(f"core.experiment_sample: {len(core_expsample)} rows")
 
     # protocol_accession is also global across ImmPort — same dedup as subject
     protocol = concat_tables("protocol", source_ids)
@@ -182,15 +175,13 @@ def main():
         "type": protocol["type"],
         "description": protocol["description"],
     })
-    core_protocol.to_sql("protocol", engine, schema="core", if_exists="append", index=False)
+    write_core(core_protocol, "protocol")
     add_provenance_bulk(provenance_rows, protocol, "protocol", "protocol_accession")
-    print(f"core.protocol: {len(core_protocol)} rows")
 
     # experiment_protocol
     e2p = concat_tables("experiment_2_protocol", source_ids)
     core_e2p = e2p[["experiment_accession", "protocol_accession"]].drop_duplicates()
-    core_e2p.to_sql("experiment_protocol", engine, schema="core", if_exists="append", index=False)
-    print(f"core.experiment_protocol: {len(core_e2p)} rows")
+    write_core(core_e2p, "experiment_protocol")
 
     # condition / study_condition
     s2c = concat_tables("study_2_condition_or_disease", source_ids)
@@ -248,9 +239,8 @@ def main():
         "temperature_value": treatment["temperature_value"],
         "temperature_unit": treatment["temperature_unit"],
     })
-    core_treatment.to_sql("treatment", engine, schema="core", if_exists="append", index=False)
+    write_core(core_treatment, "treatment")
     add_provenance_bulk(provenance_rows, treatment, "treatment", "treatment_accession")
-    print(f"core.treatment: {len(core_treatment)} rows")
 
     # ImmPort links treatment to expsample, not directly to biosample, so
     # expsample_2_treatment needs the same expsample->biosample resolution
@@ -285,9 +275,8 @@ def main():
         "disease_stage_reported": exposure["disease_stage_reported"],
         "disease_stage_preferred": exposure["disease_stage_preferred"],
     })
-    core_exposure.to_sql("immune_exposure", engine, schema="core", if_exists="append", index=False)
+    write_core(core_exposure, "immune_exposure")
     add_provenance_bulk(provenance_rows, exposure, "immune_exposure", "exposure_accession")
-    print(f"core.immune_exposure: {len(core_exposure)} rows")
 
     # publication / study_publication
     pubmed = concat_tables("study_pubmed", source_ids)
