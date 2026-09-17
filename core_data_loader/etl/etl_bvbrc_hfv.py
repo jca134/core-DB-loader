@@ -18,6 +18,15 @@ HFV = "hfv_lanl"
 
 NEUTRALIZING_TRUE = {"y", "yes", "true", "1"}
 
+# BV-BRC's own pipeline occasionally reloads the same genome under a new
+# genome_id, leaving the old and new genome_id both in bvbrc_genome /
+# bvbrc_genome_sequence with the same GenBank accession (e.g. one
+# 'Deprecated' plus one 'Complete', or several 'Complete' resubmissions a
+# few hours apart) -- a BV-BRC-internal duplicate, distinct from the
+# BV-BRC/NCBI cross-source merge above. BVBRC_STATUS_RANK picks a winner:
+# prefer a non-deprecated status, then the most recently inserted row.
+BVBRC_STATUS_RANK = {"Complete": 0, "WGS": 1, "Partial": 2, "Deprecated": 3}
+
 ENTITY_TYPES_OWNED = ["isolate", "sequence", "feature", "protein", "epitope", "antibody"]
 
 PROVENANCE_TABLES_OWNED = [
@@ -48,6 +57,7 @@ class BuildContext:
     genome_id_to_isolate: dict = field(default_factory=dict)
     ncbi_accession_to_isolate: dict = field(default_factory=dict)
     merged_isolate_count: int = 0
+    bvbrc_internal_merged_count: int = 0
 
     accession_to_sequence: dict = field(default_factory=dict)   # genbank accession -> core.sequence_id
     sequence_to_isolate: dict = field(default_factory=dict)     # core.sequence_id -> core.isolate_id
@@ -156,6 +166,38 @@ def _base_accession(acc):
     return re.sub(r"\.\d+$", "", acc) if acc else None
 
 
+def resolve_bvbrc_duplicate_genomes(genome: pd.DataFrame, genome_sequence: pd.DataFrame) -> dict:
+    """
+    Groups bvbrc_genome_sequence rows by base accession and, for any
+    accession claimed by more than one genome_id, picks one as canonical
+    (see BVBRC_STATUS_RANK). Returns {genome_id: canonical_genome_id} for
+    every genome_id that should fold into another; a genome_id with no
+    entry here is already canonical (including every genome_id that doesn't
+    share its accession with any other).
+    """
+    status_by_genome = dict(zip(genome["genome_id"], genome["genome_status"]))
+    inserted_by_genome = dict(zip(genome["genome_id"], genome["date_inserted"]))
+
+    groups = {}
+    for r in genome_sequence.itertuples(index=False):
+        base = _base_accession(r.accession)
+        if base:
+            groups.setdefault(base, []).append(r.genome_id)
+
+    canonical_for = {}
+    for genome_ids in groups.values():
+        ids = list(dict.fromkeys(genome_ids))  # de-dup while preserving first-seen order
+        if len(ids) < 2:
+            continue
+        best_rank = min(BVBRC_STATUS_RANK.get(status_by_genome.get(gid), 2) for gid in ids)
+        candidates = [gid for gid in ids if BVBRC_STATUS_RANK.get(status_by_genome.get(gid), 2) == best_rank]
+        winner = max(candidates, key=lambda gid: inserted_by_genome.get(gid) or "")
+        for gid in ids:
+            if gid != winner:
+                canonical_for[gid] = winner
+    return canonical_for
+
+
 def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome_sequence: pd.DataFrame,
                                   ncbi: pd.DataFrame):
     """
@@ -179,7 +221,15 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
     for r in genome_sequence.itertuples(index=False):
         seqs_by_genome.setdefault(r.genome_id, []).append(r)
 
+    # genome_ids that are themselves a reload of another genome_id in this
+    # file (see resolve_bvbrc_duplicate_genomes) -- skipped here and folded
+    # into their canonical genome_id's isolate/sequence once the main loop
+    # below has built it.
+    dup_genome_map = resolve_bvbrc_duplicate_genomes(genome, genome_sequence)
+
     for grow in genome.itertuples(index=False):
+        if grow.genome_id in dup_genome_map:
+            continue
         gseqs = seqs_by_genome.get(grow.genome_id, [])
 
         # Filoviruses are non-segmented, so a genome matches at most one
@@ -287,6 +337,30 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
                     "source_id": ctx.bvbrc_sid,
                 })
 
+    # Fold each duplicate genome_id's isolate/sequence into its canonical
+    # genome_id's -- the reload shares the canonical's accession(s) by
+    # construction, so ctx.accession_to_sequence already resolves to it.
+    for dup_gid, canonical_gid in dup_genome_map.items():
+        canonical_iid = ctx.genome_id_to_isolate.get(canonical_gid)
+        if canonical_iid is None:
+            continue
+        ctx.genome_id_to_isolate[dup_gid] = canonical_iid
+        add_xref(ctx.xref_rows, "isolate", canonical_iid, ctx.bvbrc_sid, "bvbrc_genome_id", dup_gid)
+        add_provenance(ctx.provenance_rows, "isolate", canonical_iid, ctx.bvbrc_sid, "bvbrc_genome", dup_gid)
+
+        for srow in seqs_by_genome.get(dup_gid, []):
+            base = _base_accession(srow.accession)
+            canonical_sid = ctx.accession_to_sequence.get(base) if base else None
+            if canonical_sid is None:
+                continue
+            # so bvbrc_genome_feature rows keyed to this reloaded genome's
+            # raw sequence_id still resolve to the one core.sequence for it
+            ctx.raw_seqid_to_sequence[srow.sequence_id] = canonical_sid
+            add_xref(ctx.xref_rows, "sequence", canonical_sid, ctx.bvbrc_sid,
+                      "genbank_accession", blank_to_none(srow.accession))
+            add_provenance(ctx.provenance_rows, "sequence", canonical_sid, ctx.bvbrc_sid,
+                            "bvbrc_genome_sequence", srow.sequence_id)
+
     # NCBI rows with no BV-BRC counterpart at all -- standalone, as before.
     for r in ncbi.itertuples(index=False):
         base = _base_accession(r.accession)
@@ -338,6 +412,7 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
         })
 
     ctx.merged_isolate_count = len(matched_bases)
+    ctx.bvbrc_internal_merged_count = len(dup_genome_map)
     return pd.DataFrame(isolate_rows), pd.DataFrame(sequence_rows)
 
 
@@ -692,7 +767,8 @@ def main():
     isolate_df, sequence_df = build_isolates_and_sequences(ctx, genome, genome_sequence, ncbi)
     _write(isolate_df, "isolate",
            f" ({len(ctx.genome_id_to_isolate)} bvbrc, {len(ctx.ncbi_accession_to_isolate)} ncbi,"
-           f" {ctx.merged_isolate_count} merged bvbrc+ncbi)")
+           f" {ctx.merged_isolate_count} merged bvbrc+ncbi,"
+           f" {ctx.bvbrc_internal_merged_count} bvbrc-internal reloads folded)")
     _write(sequence_df, "sequence")
 
     genome_feature = read_raw("bvbrc_genome_feature")
