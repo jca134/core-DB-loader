@@ -1,4 +1,5 @@
 import itertools
+import re
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -46,6 +47,7 @@ class BuildContext:
 
     genome_id_to_isolate: dict = field(default_factory=dict)
     ncbi_accession_to_isolate: dict = field(default_factory=dict)
+    merged_isolate_count: int = 0
 
     accession_to_sequence: dict = field(default_factory=dict)   # genbank accession -> core.sequence_id
     sequence_to_isolate: dict = field(default_factory=dict)     # core.sequence_id -> core.isolate_id
@@ -143,34 +145,157 @@ def build_taxon(ctx: BuildContext) -> pd.DataFrame:
     return taxon_df
 
 
-def build_isolates(ctx: BuildContext, genome: pd.DataFrame, ncbi: pd.DataFrame) -> pd.DataFrame:
-    rows = []
+def _base_accession(acc):
+    """
+    Strip a GenBank version suffix (e.g. 'KM034562.1' -> 'KM034562'). BV-BRC
+    reports genome accessions unversioned while NCBI and LANL both include
+    the version, so matching on the raw string never lines up the same
+    physical accession across sources -- matching on this base form does.
+    """
+    acc = blank_to_none(acc)
+    return re.sub(r"\.\d+$", "", acc) if acc else None
 
-    for r in genome.itertuples(index=False):
-        iid = next(ctx.isolate_id_seq)
-        ctx.genome_id_to_isolate[r.genome_id] = iid
-        rows.append({
-            "isolate_id": iid,
-            "taxon_id": safe_int(r.taxon_id) if safe_int(r.taxon_id) in ctx.taxon_ids_present else None,
-            "primary_strain_name": r.genome_name,
-            "lanl_strain_name": None,
-            "species": r.species,
-            "country": None,
-            "geo_location": None,
-            "host": r.host_common_name,
-            "tissue_specimen_source": None,
-            "collection_date": None,
-            "genome_status": r.genome_status,
-            "source_id": ctx.bvbrc_sid,
-            "notes": None,
-        })
-        add_xref(ctx.xref_rows, "isolate", iid, ctx.bvbrc_sid, "bvbrc_genome_id", r.genome_id)
-        add_provenance(ctx.provenance_rows, "isolate", iid, ctx.bvbrc_sid, "bvbrc_genome", r.genome_id)
 
+def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome_sequence: pd.DataFrame,
+                                  ncbi: pd.DataFrame):
+    """
+    BV-BRC re-annotates NCBI's own GenBank submissions, so a genome present
+    in both raw sources is the same physical isolate/sequence, matched here
+    by base GenBank accession -- one core.isolate/core.sequence row for it,
+    carrying xrefs and provenance from both sources, instead of two
+    duplicate rows. A genome only one source has still gets its own row.
+    """
+    isolate_rows = []
+    sequence_rows = []
+
+    ncbi_by_accession = {}
     for r in ncbi.itertuples(index=False):
+        base = _base_accession(r.accession)
+        if base:
+            ncbi_by_accession[base] = r
+    matched_bases = set()
+
+    seqs_by_genome: dict = {}
+    for r in genome_sequence.itertuples(index=False):
+        seqs_by_genome.setdefault(r.genome_id, []).append(r)
+
+    for grow in genome.itertuples(index=False):
+        gseqs = seqs_by_genome.get(grow.genome_id, [])
+
+        # Filoviruses are non-segmented, so a genome matches at most one
+        # NCBI accession in practice. A handful of BV-BRC genome_ids share
+        # an accession with each other (a BV-BRC-side duplicate, not
+        # something this merge is meant to fix) -- only the first one
+        # encountered claims the NCBI match; the rest fall back to
+        # bvbrc-only below, same as before this merge existed.
+        matched_ncbi_row = None
+        matched_base = None
+        for srow in gseqs:
+            base = _base_accession(srow.accession)
+            if base and base in ncbi_by_accession and base not in matched_bases:
+                matched_ncbi_row = ncbi_by_accession[base]
+                matched_base = base
+                break
+
+        iid = next(ctx.isolate_id_seq)
+        ctx.genome_id_to_isolate[grow.genome_id] = iid
+
+        add_xref(ctx.xref_rows, "isolate", iid, ctx.bvbrc_sid, "bvbrc_genome_id", grow.genome_id)
+        add_provenance(ctx.provenance_rows, "isolate", iid, ctx.bvbrc_sid, "bvbrc_genome", grow.genome_id)
+
+        if matched_ncbi_row is not None:
+            matched_bases.add(matched_base)
+            nrow = matched_ncbi_row
+            ctx.ncbi_accession_to_isolate[nrow.accession] = iid
+            isolate_rows.append({
+                "isolate_id": iid,
+                "taxon_id": safe_int(grow.taxon_id) if safe_int(grow.taxon_id) in ctx.taxon_ids_present else None,
+                "primary_strain_name": blank_to_none(grow.genome_name) or blank_to_none(nrow.organism_name),
+                "lanl_strain_name": None,
+                "species": blank_to_none(grow.species) or blank_to_none(nrow.species),
+                "country": blank_to_none(nrow.country),
+                "geo_location": blank_to_none(nrow.geo_location),
+                "host": blank_to_none(grow.host_common_name) or blank_to_none(nrow.host),
+                "tissue_specimen_source": blank_to_none(nrow.tissue_specimen_source),
+                "collection_date": safe_date(nrow.collection_date),
+                "genome_status": blank_to_none(grow.genome_status) or blank_to_none(nrow.nuc_completeness),
+                "source_id": ctx.bvbrc_sid,
+                "notes": blank_to_none(nrow.isolate),
+            })
+            add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_isolate_designation", nrow.isolate)
+            add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_assembly", nrow.assembly)
+            add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_sra_accession", nrow.sra_accession)
+            add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_biosample", nrow.biosample)
+            add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_bioproject", nrow.bioproject)
+            add_provenance(ctx.provenance_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_sequences", nrow.accession)
+        else:
+            isolate_rows.append({
+                "isolate_id": iid,
+                "taxon_id": safe_int(grow.taxon_id) if safe_int(grow.taxon_id) in ctx.taxon_ids_present else None,
+                "primary_strain_name": grow.genome_name,
+                "lanl_strain_name": None,
+                "species": grow.species,
+                "country": None,
+                "geo_location": None,
+                "host": grow.host_common_name,
+                "tissue_specimen_source": None,
+                "collection_date": None,
+                "genome_status": grow.genome_status,
+                "source_id": ctx.bvbrc_sid,
+                "notes": None,
+            })
+
+        for srow in gseqs:
+            sid = next(ctx.sequence_id_seq)
+            ctx.raw_seqid_to_sequence[srow.sequence_id] = sid
+            ctx.sequence_to_isolate[sid] = iid
+            base = _base_accession(srow.accession)
+            if base:
+                ctx.accession_to_sequence.setdefault(base, sid)
+            add_xref(ctx.xref_rows, "sequence", sid, ctx.bvbrc_sid, "genbank_accession", blank_to_none(srow.accession))
+            add_provenance(ctx.provenance_rows, "sequence", sid, ctx.bvbrc_sid, "bvbrc_genome_sequence", srow.sequence_id)
+
+            if matched_ncbi_row is not None and base == matched_base:
+                nrow = matched_ncbi_row
+                add_xref(ctx.xref_rows, "sequence", sid, ctx.ncbi_sid, "genbank_accession", blank_to_none(nrow.accession))
+                add_provenance(ctx.provenance_rows, "sequence", sid, ctx.ncbi_sid, "ncbi_sequences", nrow.accession)
+                sequence_rows.append({
+                    "sequence_id": sid,
+                    "isolate_id": iid,
+                    "molecule_type": blank_to_none(nrow.molecule_type),
+                    "sequence_type": srow.sequence_type,
+                    "segment": blank_to_none(srow.topology) or blank_to_none(nrow.segment),
+                    "length": safe_int(srow.length) or safe_int(nrow.length),
+                    "sequence_text": blank_to_none(srow.sequence),
+                    "sequence_md5": srow.sequence_md5,
+                    "is_reference": False,
+                    "release_date": safe_date(nrow.release_date),
+                    "source_id": ctx.bvbrc_sid,
+                })
+            else:
+                sequence_rows.append({
+                    "sequence_id": sid,
+                    "isolate_id": iid,
+                    "molecule_type": None,
+                    "sequence_type": srow.sequence_type,
+                    "segment": srow.topology,
+                    "length": safe_int(srow.length),
+                    "sequence_text": blank_to_none(srow.sequence),
+                    "sequence_md5": srow.sequence_md5,
+                    "is_reference": False,
+                    "release_date": None,
+                    "source_id": ctx.bvbrc_sid,
+                })
+
+    # NCBI rows with no BV-BRC counterpart at all -- standalone, as before.
+    for r in ncbi.itertuples(index=False):
+        base = _base_accession(r.accession)
+        if base and base in matched_bases:
+            continue
+
         iid = next(ctx.isolate_id_seq)
         ctx.ncbi_accession_to_isolate[r.accession] = iid
-        rows.append({
+        isolate_rows.append({
             "isolate_id": iid,
             "taxon_id": None,  # ncbi's taxon ids aren't in the bvbrc taxonomy set, so nothing to resolve against
             "primary_strain_name": r.organism_name,
@@ -192,48 +317,15 @@ def build_isolates(ctx: BuildContext, genome: pd.DataFrame, ncbi: pd.DataFrame) 
         add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_bioproject", r.bioproject)
         add_provenance(ctx.provenance_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_sequences", r.accession)
 
-    return pd.DataFrame(rows)
-
-
-def build_sequences(ctx: BuildContext, genome_sequence: pd.DataFrame, ncbi: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-
-    for r in genome_sequence.itertuples(index=False):
         sid = next(ctx.sequence_id_seq)
-        ctx.raw_seqid_to_sequence[r.sequence_id] = sid
-        isolate_id = ctx.genome_id_to_isolate.get(r.genome_id)
-        ctx.sequence_to_isolate[sid] = isolate_id
-        acc = blank_to_none(r.accession)
-        if acc:
-            ctx.accession_to_sequence.setdefault(acc, sid)
-        add_xref(ctx.xref_rows, "sequence", sid, ctx.bvbrc_sid, "genbank_accession", acc)
-        add_provenance(ctx.provenance_rows, "sequence", sid, ctx.bvbrc_sid, "bvbrc_genome_sequence", r.sequence_id)
-        rows.append({
-            "sequence_id": sid,
-            "isolate_id": isolate_id,
-            "molecule_type": None,
-            "sequence_type": r.sequence_type,
-            "segment": r.topology,
-            "length": safe_int(r.length),
-            "sequence_text": blank_to_none(r.sequence),
-            "sequence_md5": r.sequence_md5,
-            "is_reference": False,
-            "release_date": None,
-            "source_id": ctx.bvbrc_sid,
-        })
-
-    for r in ncbi.itertuples(index=False):
-        sid = next(ctx.sequence_id_seq)
-        acc = blank_to_none(r.accession)
-        isolate_id = ctx.ncbi_accession_to_isolate.get(r.accession)
-        ctx.sequence_to_isolate[sid] = isolate_id
-        if acc:
-            ctx.accession_to_sequence.setdefault(acc, sid)
-        add_xref(ctx.xref_rows, "sequence", sid, ctx.ncbi_sid, "genbank_accession", acc)
+        ctx.sequence_to_isolate[sid] = iid
+        if base:
+            ctx.accession_to_sequence.setdefault(base, sid)
+        add_xref(ctx.xref_rows, "sequence", sid, ctx.ncbi_sid, "genbank_accession", blank_to_none(r.accession))
         add_provenance(ctx.provenance_rows, "sequence", sid, ctx.ncbi_sid, "ncbi_sequences", r.accession)
-        rows.append({
+        sequence_rows.append({
             "sequence_id": sid,
-            "isolate_id": isolate_id,
+            "isolate_id": iid,
             "molecule_type": r.molecule_type,
             "sequence_type": "genomic",
             "segment": blank_to_none(r.segment),
@@ -245,7 +337,8 @@ def build_sequences(ctx: BuildContext, genome_sequence: pd.DataFrame, ncbi: pd.D
             "source_id": ctx.ncbi_sid,
         })
 
-    return pd.DataFrame(rows)
+    ctx.merged_isolate_count = len(matched_bases)
+    return pd.DataFrame(isolate_rows), pd.DataFrame(sequence_rows)
 
 
 def build_features_and_proteins(ctx: BuildContext, genome_feature: pd.DataFrame):
@@ -467,7 +560,7 @@ def build_alignments(ctx: BuildContext):
             # strain_label ends in a GenBank accession, e.g.
             # ".../Yambuku-Mayinga/NC_002549" -> "NC_002549"
             accession = r.strain_label.rsplit("/", 1)[-1] if r.strain_label else None
-            seq_id = ctx.accession_to_sequence.get(accession) if accession else None
+            seq_id = ctx.accession_to_sequence.get(_base_accession(accession)) if accession else None
             isolate_id = ctx.sequence_to_isolate.get(seq_id) if seq_id is not None else None
             member_id = next(ctx.alignment_member_id_seq)
             member_rows.append({
@@ -534,7 +627,7 @@ def apply_hfv_isolate_enrichment(ctx: BuildContext, conn, annotation: pd.DataFra
     updated = 0
     for r in annotation.itertuples(index=False):
         accession = blank_to_none(r.accession)
-        seq_id = ctx.accession_to_sequence.get(accession) if accession else None
+        seq_id = ctx.accession_to_sequence.get(_base_accession(accession)) if accession else None
         isolate_id = ctx.sequence_to_isolate.get(seq_id) if seq_id is not None else None
         if isolate_id is None:
             continue
@@ -595,11 +688,12 @@ def main():
 
     genome = read_raw("bvbrc_genome")
     ncbi = read_raw("ncbi_sequences")
-    isolate_df = build_isolates(ctx, genome, ncbi)
-    _write(isolate_df, "isolate", f" ({len(ctx.genome_id_to_isolate)} bvbrc, {len(ctx.ncbi_accession_to_isolate)} ncbi)")
-
     genome_sequence = read_raw("bvbrc_genome_sequence")
-    _write(build_sequences(ctx, genome_sequence, ncbi), "sequence")
+    isolate_df, sequence_df = build_isolates_and_sequences(ctx, genome, genome_sequence, ncbi)
+    _write(isolate_df, "isolate",
+           f" ({len(ctx.genome_id_to_isolate)} bvbrc, {len(ctx.ncbi_accession_to_isolate)} ncbi,"
+           f" {ctx.merged_isolate_count} merged bvbrc+ncbi)")
+    _write(sequence_df, "sequence")
 
     genome_feature = read_raw("bvbrc_genome_feature")
     feature_df, protein_df = build_features_and_proteins(ctx, genome_feature)
