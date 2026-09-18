@@ -18,6 +18,16 @@ HFV = "hfv_lanl"
 
 NEUTRALIZING_TRUE = {"y", "yes", "true", "1"}
 
+
+def hfv_clean(v):
+    # LANL uses a bare "_" as its own null placeholder throughout its HFV
+    # exports (antibody/CTL iedb_id, the annotation_web patient fields),
+    # distinct from blank_to_none's "empty string" handling -- without this,
+    # "_" gets stored as if it were a real value (e.g. a fake iedb_id xref).
+    v = blank_to_none(v)
+    return None if v == "_" else v
+
+
 ENTITY_TYPES_OWNED = ["isolate", "sequence", "feature", "protein", "epitope", "antibody"]
 
 PROVENANCE_TABLES_OWNED = [
@@ -107,7 +117,7 @@ class BuildContext:
             "taxon_id": None,  # no bvbrc taxonomy resolution attempted for hfv-sourced epitopes
             "source_id": self.hfv_sid,
         })
-        add_xref(self.xref_rows, "epitope", eid, self.hfv_sid, "iedb_id", iedb_id)
+        add_xref(self.xref_rows, "epitope", eid, self.hfv_sid, "iedb_id", hfv_clean(iedb_id))
         # raw_table/raw_pk describe whichever raw row first minted this
         # epitope; a later dedup hit against the same key isn't re-recorded.
         if raw_table is not None:
@@ -493,7 +503,7 @@ def build_antibodies(ctx: BuildContext, antibody: pd.DataFrame) -> pd.DataFrame:
             "immunogen": blank_to_none(r.immunogen),
             "source_id": ctx.hfv_sid,
         })
-        add_xref(ctx.xref_rows, "antibody", aid, ctx.hfv_sid, "iedb_id", r.iedb_id)
+        add_xref(ctx.xref_rows, "antibody", aid, ctx.hfv_sid, "iedb_id", hfv_clean(r.iedb_id))
         add_provenance(ctx.provenance_rows, "antibody", aid, ctx.hfv_sid, "hfv_ebola_antibody", r.iedb_id)
 
         if blank_to_none(r.epitope_location_sequence) or blank_to_none(r.protein):
@@ -614,12 +624,6 @@ def apply_hfv_isolate_enrichment(ctx: BuildContext, conn, annotation: pd.DataFra
     doesn't cover it (e.g. an isolate BV-BRC/NCBI provided that LANL didn't
     curate), and lets a re-run stay idempotent.
     """
-    def clean(v):
-        # LANL uses a bare "_" as its own null placeholder throughout this
-        # table, distinct from blank_to_none's "empty string" handling.
-        v = blank_to_none(v)
-        return None if v == "_" else v
-
     updated = 0
     for r in annotation.itertuples(index=False):
         accession = blank_to_none(r.accession)
@@ -649,9 +653,9 @@ def apply_hfv_isolate_enrichment(ctx: BuildContext, conn, annotation: pd.DataFra
             ),
             {
                 "lanl_strain_name": lanl_strain_name,
-                "patient_outcome": clean(r.patient_outcome),
-                "patient_age": clean(r.patient_age),
-                "patient_sex": clean(r.patient_sex),
+                "patient_outcome": hfv_clean(r.patient_outcome),
+                "patient_age": hfv_clean(r.patient_age),
+                "patient_sex": hfv_clean(r.patient_sex),
                 "symptom_onset_date": safe_date(r.patient_date_of_symptoms_onset),
                 "death_date": safe_date(r.patient_date_of_death),
                 "isolate_id": isolate_id,
