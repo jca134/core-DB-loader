@@ -383,29 +383,6 @@ CREATE TABLE IF NOT EXISTS core.immune_exposure (
     disease_stage_preferred       TEXT
 );
 
--- Not populated yet: ImmPort's per-analyte lab/assay result files (e.g. ELISA,
--- titer readouts) aren't loaded by load_immport.py yet, so etl_immport.py has
--- nothing to write here. Kept because that data is a known, concrete gap.
-CREATE TABLE IF NOT EXISTS core.assay_result (
-    result_id                   BIGSERIAL PRIMARY KEY,
-    result_type                 TEXT NOT NULL,
-    study_accession             TEXT REFERENCES core.study(study_accession),
-    arm_accession               TEXT REFERENCES core.study_arm(arm_accession),
-    experiment_accession        TEXT REFERENCES core.experiment(experiment_accession),
-    expsample_accession         TEXT REFERENCES core.experiment_sample(expsample_accession),
-    biosample_accession         TEXT REFERENCES core.biosample(biosample_accession),
-    subject_accession           TEXT REFERENCES core.subject(subject_accession),
-    analyte_reported            TEXT,
-    analyte_preferred           TEXT,
-    value_reported              TEXT,
-    value_preferred             NUMERIC,
-    unit_reported               TEXT,
-    unit_preferred              TEXT,
-    study_time_collected        NUMERIC,
-    study_time_collected_unit   TEXT,
-    source_id                   INTEGER REFERENCES core.source(source_id)
-);
-
 CREATE TABLE IF NOT EXISTS core.publication (
     publication_id BIGSERIAL PRIMARY KEY,
     pubmed_id      TEXT UNIQUE,
@@ -433,6 +410,3 @@ CREATE INDEX IF NOT EXISTS idx_antibody_epitope_antibody ON core.antibody_epitop
 CREATE INDEX IF NOT EXISTS idx_biosample_subject ON core.biosample(subject_accession);
 CREATE INDEX IF NOT EXISTS idx_biosample_study ON core.biosample(study_accession);
 CREATE INDEX IF NOT EXISTS idx_experiment_study ON core.experiment(study_accession);
-CREATE INDEX IF NOT EXISTS idx_assay_result_study ON core.assay_result(study_accession);
-CREATE INDEX IF NOT EXISTS idx_assay_result_biosample ON core.assay_result(biosample_accession);
-CREATE INDEX IF NOT EXISTS idx_assay_result_subject ON core.assay_result(subject_accession);
