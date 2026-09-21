@@ -69,6 +69,19 @@ CREATE TABLE IF NOT EXISTS core.isolate (
     death_date          DATE
 );
 
+-- Cell-level provenance for a merged BV-BRC+NCBI isolate row. isolate.source_id
+-- above can only say which source the row is anchored to (BV-BRC, whenever a
+-- BV-BRC genome exists) -- it can't say that e.g. country or collection_date
+-- on that same row actually came from NCBI. One row per (isolate_id,
+-- field_name) that had a non-null winning value; see pick_field() in
+-- core_data_loader/common/accessions.py and its use in build_isolates_and_sequences().
+CREATE TABLE IF NOT EXISTS core.isolate_field_source (
+    isolate_id BIGINT NOT NULL REFERENCES core.isolate(isolate_id),
+    field_name TEXT NOT NULL,
+    source_id  INTEGER NOT NULL REFERENCES core.source(source_id),
+    PRIMARY KEY (isolate_id, field_name)
+);
+
 CREATE TABLE IF NOT EXISTS core.sequence (
     sequence_id     BIGSERIAL PRIMARY KEY,
     isolate_id      BIGINT REFERENCES core.isolate(isolate_id),
@@ -81,6 +94,18 @@ CREATE TABLE IF NOT EXISTS core.sequence (
     is_reference    BOOLEAN NOT NULL DEFAULT FALSE,
     release_date    DATE,                   -- submission/release date, distinct from isolate.collection_date
     source_id       INTEGER REFERENCES core.source(source_id)
+);
+
+-- Cell-level provenance for a merged BV-BRC+NCBI sequence row, same idea as
+-- core.isolate_field_source above: sequence.source_id is always ctx.bvbrc_sid
+-- on a merged row even when e.g. molecule_type or release_date came entirely
+-- from NCBI's matched record. One row per (sequence_id, field_name) that had
+-- a non-null winning value.
+CREATE TABLE IF NOT EXISTS core.sequence_field_source (
+    sequence_id BIGINT NOT NULL REFERENCES core.sequence(sequence_id),
+    field_name  TEXT NOT NULL,
+    source_id   INTEGER NOT NULL REFERENCES core.source(source_id),
+    PRIMARY KEY (sequence_id, field_name)
 );
 
 CREATE TABLE IF NOT EXISTS core.feature (

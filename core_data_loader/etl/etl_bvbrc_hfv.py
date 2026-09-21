@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 from sqlalchemy import text
 
-from core_data_loader.common.accessions import base_accession, resolve_bvbrc_duplicate_genomes
+from core_data_loader.common.accessions import base_accession, resolve_bvbrc_duplicate_genomes, pick_field
 from core_data_loader.common.etl_common import (
     engine, ensure_sources, truncate, read_raw, write_core,
     safe_int, safe_float, safe_date, blank_to_none,
@@ -38,6 +38,33 @@ PROVENANCE_TABLES_OWNED = [
 
 def _counter():
     return itertools.count(1)
+
+
+def _isolate_field(ctx, isolate_id, field_name, *candidates):
+    """
+    pick_field(), plus recording the winning source as a core.isolate_field_source
+    row when there was one -- see that table's comment in sql/02_core.sql.
+    """
+    value, source_id = pick_field(*candidates)
+    if source_id is not None:
+        ctx.field_source_rows.append({
+            "isolate_id": isolate_id,
+            "field_name": field_name,
+            "source_id": source_id,
+        })
+    return value
+
+
+def _sequence_field(ctx, sequence_id, field_name, *candidates):
+    """Same as _isolate_field, for core.sequence_field_source."""
+    value, source_id = pick_field(*candidates)
+    if source_id is not None:
+        ctx.sequence_field_source_rows.append({
+            "sequence_id": sequence_id,
+            "field_name": field_name,
+            "source_id": source_id,
+        })
+    return value
 
 
 @dataclass
@@ -76,6 +103,8 @@ class BuildContext:
     antibody_epitope_rows: list = field(default_factory=list)
     xref_rows: list = field(default_factory=list)
     provenance_rows: list = field(default_factory=list)
+    field_source_rows: list = field(default_factory=list)  # core.isolate_field_source
+    sequence_field_source_rows: list = field(default_factory=list)  # core.sequence_field_source
 
     isolate_id_seq: itertools.count = field(default_factory=_counter)
     sequence_id_seq: itertools.count = field(default_factory=_counter)
@@ -214,20 +243,55 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
 
         # BV-BRC's own fields win where both sources have one; nrow (the
         # matched NCBI row, or None) only fills what BV-BRC leaves blank.
+        # _isolate_field() also records, per field, which source's value
+        # actually won -- isolate.source_id alone can't say that, since it's
+        # always ctx.bvbrc_sid on a merged row even when e.g. country or
+        # collection_date came entirely from NCBI.
         isolate_rows.append({
             "isolate_id": iid,
             "taxon_id": safe_int(grow.taxon_id) if safe_int(grow.taxon_id) in ctx.taxon_ids_present else None,
-            "primary_strain_name": blank_to_none(grow.genome_name) or (blank_to_none(nrow.organism_name) if nrow else None),
+            "primary_strain_name": _isolate_field(
+                ctx, iid, "primary_strain_name",
+                (ctx.bvbrc_sid, blank_to_none(grow.genome_name)),
+                (ctx.ncbi_sid, blank_to_none(nrow.organism_name) if nrow else None),
+            ),
             "lanl_strain_name": None,
-            "species": blank_to_none(grow.species) or (blank_to_none(nrow.species) if nrow else None),
-            "country": blank_to_none(nrow.country) if nrow else None,
-            "geo_location": blank_to_none(nrow.geo_location) if nrow else None,
-            "host": blank_to_none(grow.host_common_name) or (blank_to_none(nrow.host) if nrow else None),
-            "tissue_specimen_source": blank_to_none(nrow.tissue_specimen_source) if nrow else None,
-            "collection_date": safe_date(nrow.collection_date) if nrow else None,
-            "genome_status": blank_to_none(grow.genome_status) or (blank_to_none(nrow.nuc_completeness) if nrow else None),
+            "species": _isolate_field(
+                ctx, iid, "species",
+                (ctx.bvbrc_sid, blank_to_none(grow.species)),
+                (ctx.ncbi_sid, blank_to_none(nrow.species) if nrow else None),
+            ),
+            "country": _isolate_field(
+                ctx, iid, "country",
+                (ctx.ncbi_sid, blank_to_none(nrow.country) if nrow else None),
+            ),
+            "geo_location": _isolate_field(
+                ctx, iid, "geo_location",
+                (ctx.ncbi_sid, blank_to_none(nrow.geo_location) if nrow else None),
+            ),
+            "host": _isolate_field(
+                ctx, iid, "host",
+                (ctx.bvbrc_sid, blank_to_none(grow.host_common_name)),
+                (ctx.ncbi_sid, blank_to_none(nrow.host) if nrow else None),
+            ),
+            "tissue_specimen_source": _isolate_field(
+                ctx, iid, "tissue_specimen_source",
+                (ctx.ncbi_sid, blank_to_none(nrow.tissue_specimen_source) if nrow else None),
+            ),
+            "collection_date": _isolate_field(
+                ctx, iid, "collection_date",
+                (ctx.ncbi_sid, safe_date(nrow.collection_date) if nrow else None),
+            ),
+            "genome_status": _isolate_field(
+                ctx, iid, "genome_status",
+                (ctx.bvbrc_sid, blank_to_none(grow.genome_status)),
+                (ctx.ncbi_sid, blank_to_none(nrow.nuc_completeness) if nrow else None),
+            ),
             "source_id": ctx.bvbrc_sid,
-            "notes": blank_to_none(nrow.isolate) if nrow else None,
+            "notes": _isolate_field(
+                ctx, iid, "notes",
+                (ctx.ncbi_sid, blank_to_none(nrow.isolate) if nrow else None),
+            ),
         })
         if nrow is not None:
             matched_bases.add(matched_base)
@@ -254,17 +318,36 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
                 add_xref(ctx.xref_rows, "sequence", sid, ctx.ncbi_sid, "genbank_accession", blank_to_none(seq_nrow.accession))
                 add_provenance(ctx.provenance_rows, "sequence", sid, ctx.ncbi_sid, "ncbi_sequences", seq_nrow.accession)
 
+            # Same idea as the isolate fields above: srow's own fields win
+            # where both sources have one; seq_nrow only fills what BV-BRC
+            # leaves blank. _sequence_field() records, per field, which
+            # source's value actually won -- sequence.source_id alone can't,
+            # since it's always ctx.bvbrc_sid on a merged row.
             sequence_rows.append({
                 "sequence_id": sid,
                 "isolate_id": iid,
-                "molecule_type": blank_to_none(seq_nrow.molecule_type) if seq_nrow else None,
+                "molecule_type": _sequence_field(
+                    ctx, sid, "molecule_type",
+                    (ctx.ncbi_sid, blank_to_none(seq_nrow.molecule_type) if seq_nrow else None),
+                ),
                 "sequence_type": srow.sequence_type,
-                "segment": blank_to_none(srow.topology) or (blank_to_none(seq_nrow.segment) if seq_nrow else None),
-                "length": safe_int(srow.length) or (safe_int(seq_nrow.length) if seq_nrow else None),
+                "segment": _sequence_field(
+                    ctx, sid, "segment",
+                    (ctx.bvbrc_sid, blank_to_none(srow.topology)),
+                    (ctx.ncbi_sid, blank_to_none(seq_nrow.segment) if seq_nrow else None),
+                ),
+                "length": _sequence_field(
+                    ctx, sid, "length",
+                    (ctx.bvbrc_sid, safe_int(srow.length)),
+                    (ctx.ncbi_sid, safe_int(seq_nrow.length) if seq_nrow else None),
+                ),
                 "sequence_text": blank_to_none(srow.sequence),
                 "sequence_md5": srow.sequence_md5,
                 "is_reference": False,
-                "release_date": safe_date(seq_nrow.release_date) if seq_nrow else None,
+                "release_date": _sequence_field(
+                    ctx, sid, "release_date",
+                    (ctx.ncbi_sid, safe_date(seq_nrow.release_date) if seq_nrow else None),
+                ),
                 "source_id": ctx.bvbrc_sid,
             })
 
@@ -680,8 +763,8 @@ def main():
         "core.structure",
         "core.protein",
         "core.feature",
-        "core.sequence",
-        "core.isolate", "core.taxon",
+        "core.sequence_field_source", "core.sequence",
+        "core.isolate_field_source", "core.isolate", "core.taxon",
     )
 
     write_core(build_taxon(ctx), "taxon")
@@ -696,7 +779,9 @@ def main():
         f" {ctx.merged_isolate_count} merged bvbrc+ncbi,"
         f" {ctx.bvbrc_internal_merged_count} bvbrc-internal reloads folded)",
     )
+    write_core(pd.DataFrame(ctx.field_source_rows), "isolate_field_source")
     write_core(sequence_df, "sequence")
+    write_core(pd.DataFrame(ctx.sequence_field_source_rows), "sequence_field_source")
 
     genome_feature = read_raw("bvbrc_genome_feature")
     feature_df, protein_df = build_features_and_proteins(ctx, genome_feature)

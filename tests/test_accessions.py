@@ -8,7 +8,7 @@ was previously only checkable by running the full ETL against the real
 filovirus DB and hand-inspecting row counts.
 """
 
-from core_data_loader.common.accessions import base_accession, resolve_bvbrc_duplicate_genomes
+from core_data_loader.common.accessions import base_accession, resolve_bvbrc_duplicate_genomes, pick_field
 
 
 class TestBaseAccession:
@@ -92,3 +92,22 @@ class TestResolveBvbrcDuplicateGenomes:
         result = resolve_bvbrc_duplicate_genomes(accession_groups, status, inserted)
 
         assert result == {"g1": "g2"}
+
+
+class TestPickField:
+    def test_first_candidate_wins_when_present(self):
+        assert pick_field((1, "bvbrc value"), (2, "ncbi value")) == ("bvbrc value", 1)
+
+    def test_falls_through_to_later_candidate_when_earlier_ones_are_none(self):
+        assert pick_field((1, None), (2, "ncbi value")) == ("ncbi value", 2)
+
+    def test_all_none_returns_none_value_and_none_source(self):
+        assert pick_field((1, None), (2, None)) == (None, None)
+
+    def test_single_candidate_source_only_table(self):
+        # e.g. isolate.country, which only ever comes from NCBI's matched row.
+        assert pick_field((2, "Guinea")) == ("Guinea", 2)
+        assert pick_field((2, None)) == (None, None)
+
+    def test_no_candidates_returns_none_value_and_none_source(self):
+        assert pick_field() == (None, None)

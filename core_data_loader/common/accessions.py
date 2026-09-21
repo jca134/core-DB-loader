@@ -58,3 +58,21 @@ def resolve_bvbrc_duplicate_genomes(genome_ids_by_accession: dict, status_by_gen
             if gid != winner:
                 canonical_for[gid] = winner
     return canonical_for
+
+
+def pick_field(*candidates):
+    """
+    candidates: (source_id, value) pairs in priority order -- the same
+    priority a merged isolate row's field-by-field 'X or Y' already encodes
+    inline (e.g. BV-BRC's own field before NCBI's matched row fills the
+    blank). Returns (value, source_id) for the first non-None value, or
+    (None, None) if every candidate is None.
+
+    Exists because a merged row's single source_id can only name the row's
+    anchor source (see build_isolates_and_sequences in etl_bvbrc_hfv.py) --
+    this lets a caller record, per field, which source actually won it.
+    """
+    for source_id, value in candidates:
+        if value is not None:
+            return value, source_id
+    return None, None
