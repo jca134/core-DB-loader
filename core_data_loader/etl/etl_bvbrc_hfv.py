@@ -519,6 +519,7 @@ def build_structures(ctx: BuildContext, protein_structure: pd.DataFrame) -> pd.D
             "organism_name": r.organism_name,
             "taxon_id": taxon_id if taxon_id in ctx.taxon_ids_present else None,
             "source_id": ctx.bvbrc_sid,
+            "sequence_text": blank_to_none(r.sequence),
         })
         add_provenance(ctx.provenance_rows, "structure", structure_id, ctx.bvbrc_sid,
                         "bvbrc_protein_structure", r.pdb_id)

@@ -175,7 +175,13 @@ CREATE TABLE IF NOT EXISTS core.structure (
     release_date    DATE,
     organism_name   TEXT,
     taxon_id        INTEGER REFERENCES core.taxon(taxon_id),
-    source_id       INTEGER REFERENCES core.source(source_id)
+    source_id       INTEGER REFERENCES core.source(source_id),
+    -- The only place in core.* with real amino-acid sequence text --
+    -- core.protein.sequence_text is always null (genome_feature.csv only
+    -- carries aa_length/md5, never the sequence itself; see build_features_and_proteins).
+    -- protein_structure.csv does carry it, for the subset of proteins with a
+    -- solved structure.
+    sequence_text   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS core.epitope (
