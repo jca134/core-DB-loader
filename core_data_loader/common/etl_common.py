@@ -176,5 +176,12 @@ def write_provenance(provenance_rows: list, core_tables: list):
     if not provenance_rows:
         print("ops.entity_provenance: 0 rows")
         return
-    pd.DataFrame(provenance_rows).to_sql("entity_provenance", engine, schema="ops", if_exists="append", index=False)
-    print(f"ops.entity_provenance: {len(provenance_rows)} rows ({', '.join(core_tables)})")
+    # Dedup like write_xref: an identical lineage tuple carries no extra
+    # information. Needed because not every raw table has a unique row key --
+    # hfv_ebola_ctl only has iedb_id, so two of its rows that collapse into one
+    # epitope *and* share an iedb_id are indistinguishable here.
+    df = pd.DataFrame(provenance_rows).drop_duplicates(
+        subset=["core_table", "core_pk", "source_id", "raw_table", "raw_pk"]
+    )
+    df.to_sql("entity_provenance", engine, schema="ops", if_exists="append", index=False)
+    print(f"ops.entity_provenance: {len(df)} rows ({', '.join(core_tables)})")

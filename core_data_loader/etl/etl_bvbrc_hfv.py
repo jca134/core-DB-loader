@@ -175,27 +175,34 @@ class BuildContext:
         # more than one species, and collapsing those into one row would let
         # whichever species loaded first own the epitope's taxon.
         key = (hfv_clean(protein), hfv_clean(seq), taxon_id)
-        if key in self.hfv_epitope_lookup:
-            return self.hfv_epitope_lookup[key]
-        eid = next(self.epitope_id_seq)
-        self.epitope_rows.append({
-            "epitope_id": eid,
-            "protein_id": None,
-            "epitope_sequence": hfv_clean(seq),
-            "start": None,
-            "end": None,
-            "epitope_type": hfv_clean(epitope_type),
-            "host_species": host_species,
-            "organism": organism,
-            "taxon_id": taxon_id,
-            "source_id": self.hfv_sid,
-        })
+        eid = self.hfv_epitope_lookup.get(key)
+        if eid is None:
+            eid = next(self.epitope_id_seq)
+            self.epitope_rows.append({
+                "epitope_id": eid,
+                "protein_id": None,
+                "epitope_sequence": hfv_clean(seq),
+                "start": None,
+                "end": None,
+                "epitope_type": hfv_clean(epitope_type),
+                "host_species": host_species,
+                "organism": organism,
+                "taxon_id": taxon_id,
+                "source_id": self.hfv_sid,
+            })
+            self.hfv_epitope_lookup[key] = eid
+
+        # Recorded for *every* contributing raw row, not just the one that
+        # minted the epitope. LANL gives several rows the same protein+location
+        # (2G4/4G7 both report "Q 508" on GP) while only some of them carry an
+        # IEDB ID, so keying these off the mint made the surviving id depend on
+        # row order -- e.g. 2G4 minted "Q 508" with iedb_id "_" and silently
+        # dropped 4G7's real 156605. add_xref skips nulls and write_xref dedups
+        # per (entity, type, value), so re-recording a shared id is a no-op.
         add_xref(self.xref_rows, "epitope", eid, self.hfv_sid, "iedb_id", hfv_clean(iedb_id))
-        # raw_table/raw_pk describe whichever raw row first minted this
-        # epitope; a later dedup hit against the same key isn't re-recorded.
         if raw_table is not None:
-            add_provenance(self.provenance_rows, "epitope", eid, self.hfv_sid, raw_table, raw_pk)
-        self.hfv_epitope_lookup[key] = eid
+            add_provenance(self.provenance_rows, "epitope", eid, self.hfv_sid,
+                           raw_table, hfv_clean(raw_pk))
         return eid
 
 
@@ -647,13 +654,17 @@ def build_antibodies(ctx: BuildContext, antibody: pd.DataFrame) -> pd.DataFrame:
             "source_id": ctx.hfv_sid,
         })
         add_xref(ctx.xref_rows, "antibody", aid, ctx.hfv_sid, "iedb_id", hfv_clean(r.iedb_id))
-        add_provenance(ctx.provenance_rows, "antibody", aid, ctx.hfv_sid, "hfv_ebola_antibody", r.iedb_id)
+        # raw_pk is the sheet's "order" column, which is unique per row, rather
+        # than iedb_id -- 25 of these rows have iedb_id "_", so keying lineage
+        # on it left them pointing at no identifiable raw row.
+        add_provenance(ctx.provenance_rows, "antibody", aid, ctx.hfv_sid,
+                       "hfv_ebola_antibody", getattr(r, "order", None))
 
         if hfv_clean(r.epitope_location_sequence) or hfv_clean(r.protein):
             eid = ctx.get_or_create_hfv_epitope(
                 r.protein, r.epitope_location_sequence, r.epitope_type,
                 iedb_id=r.iedb_id,
-                raw_table="hfv_ebola_antibody", raw_pk=r.iedb_id,
+                raw_table="hfv_ebola_antibody", raw_pk=getattr(r, "order", None),
                 taxon_id=hfv_species_taxon(ctx, r.infecting_vaccine_species_and_strain),
             )
             ctx.antibody_epitope_rows.append({
