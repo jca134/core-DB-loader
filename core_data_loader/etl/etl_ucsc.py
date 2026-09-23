@@ -1,7 +1,7 @@
 import re
 
 from core_data_loader.common.etl_common import (
-    engine, ensure_sources, truncate, read_raw, safe_int, blank_to_none,
+    engine, ensure_sources, truncate, read_raw, safe_int, safe_float, blank_to_none,
     add_provenance, write_provenance,
 )
 from sqlalchemy import text
@@ -24,18 +24,19 @@ VERSION_SUFFIX_RE = re.compile(r"v\d+$")
 
 
 def resolve_sequence_id(conn, chrom: str):
-    base_accession = VERSION_SUFFIX_RE.sub("", chrom)
-    row = conn.execute(
+    # UCSC names the chrom "KM034562v1"; core.xref holds BV-BRC's unversioned
+    # "KM034562" and NCBI's "KM034562.1", so match either form.
+    acc = VERSION_SUFFIX_RE.sub("", chrom)
+    return conn.execute(
         text(
             """
             SELECT MIN(entity_id) FROM core.xref
             WHERE entity_type = 'sequence' AND xref_type = 'genbank_accession'
-              AND xref_value = :acc
+              AND (xref_value = :acc OR xref_value LIKE :acc || '.%')
             """
         ),
-        {"acc": base_accession},
-    ).fetchone()
-    return row[0] if row else None
+        {"acc": acc},
+    ).scalar()
 
 
 def main():
@@ -120,7 +121,7 @@ def main():
             "pfam_name": r.name,
             "start_pos": start_pos,
             "end_pos": end_pos,
-            "score": safe_int(r.score),
+            "score": safe_float(r.score),  # core.gene_domain.score is NUMERIC
             "source_id": ucsc_sid,
         })
 

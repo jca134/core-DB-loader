@@ -5,13 +5,18 @@ something derived from any raw.* source, so it lives in code rather than in
 an etl_*.py transform -- see etl_taxon_condition.py, which just calls
 ensure_taxon_conditions() after core.taxon and core.condition are populated.
 
-taxon_id values are real NCBI ids already present in core.taxon (BV-BRC's
-Filoviridae taxonomy pull; verified against data/bvbrc/taxonomy.csv and the
-taxon_ids actually attached to genomes in data/bvbrc/genome.csv). ontology_id
+taxon_id values are real NCBI ids at species rank, present in core.taxon
+(BV-BRC's Filoviridae taxonomy pull). Data rows mostly attach to taxa below
+the species -- e.g. Zaire ebolavirus 186538 and Ebola virus 1570291 both sit
+under Orthoebolavirus zairense 3052462 -- so mappings are made at the species
+and reach those rows through the core.taxon_condition_inherited view. BV-BRC
+mixes taxonomy vintages: Marburg appears under both the renamed species
+(3052505) and the legacy one (11269, which has its own genus branch), so both
+are listed. ontology_id
 values are Disease Ontology ids, matched against core.condition.ontology_id,
 which etl_immport.py populates from ImmPort's own lk_disease vocabulary.
 
-Reston ebolavirus (taxon 186539) is deliberately left out: DOID:4325 defines
+Reston (Orthoebolavirus restonense 3052459) is deliberately left out: DOID:4325 defines
 Ebola hemorrhagic fever as caused by Zaire, Sudan, Tai Forest, or Bundibugyo
 ebolavirus only -- Reston isn't associated with human disease.
 """
@@ -22,11 +27,12 @@ from core_data_loader.common.db_utils import engine
 
 # (taxon_id, taxon_name, disease_ontology_id, disease_name)
 TAXON_CONDITIONS = [
-    (186538, "Zaire ebolavirus", "DOID:4325", "Ebola hemorrhagic fever"),
-    (186540, "Sudan ebolavirus", "DOID:4325", "Ebola hemorrhagic fever"),
-    (565995, "Bundibugyo virus", "DOID:4325", "Ebola hemorrhagic fever"),
-    (186541, "Tai Forest ebolavirus", "DOID:4325", "Ebola hemorrhagic fever"),
+    (3052462, "Orthoebolavirus zairense", "DOID:4325", "Ebola hemorrhagic fever"),
+    (3052460, "Orthoebolavirus sudanense", "DOID:4325", "Ebola hemorrhagic fever"),
+    (3052458, "Orthoebolavirus bundibugyoense", "DOID:4325", "Ebola hemorrhagic fever"),
+    (3052461, "Orthoebolavirus taiense", "DOID:4325", "Ebola hemorrhagic fever"),
     (3052505, "Orthomarburgvirus marburgense", "DOID:4327", "Marburg hemorrhagic fever"),
+    (11269, "Marburg marburgvirus", "DOID:4327", "Marburg hemorrhagic fever"),
 ]
 
 

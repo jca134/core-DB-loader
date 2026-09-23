@@ -31,7 +31,9 @@ def safe_int(v):
         return None
     try:
         return int(float(s))  # float() first so values like "3.0" still parse
-    except ValueError:
+    except (ValueError, OverflowError):
+        # OverflowError covers the values float() accepts but int() can't
+        # represent ("inf", "1e400") -- without it one bad cell aborts a run.
         return None
 
 
@@ -47,7 +49,7 @@ def safe_float(v):
 
 _DATE_FORMATS = (
     "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S",
-    "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y",
+    "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%d-%b-%Y",
 )
 
 
@@ -61,6 +63,26 @@ def safe_date(v):
         except ValueError:
             continue
     return None
+
+
+# A year, optionally followed by a month: "2014", "2014-08". Collection dates
+# are this imprecise for roughly a fifth of the BV-BRC/NCBI records.
+_PARTIAL_DATE_RE = re.compile(r"(\d{4})(?:-\d{2})?")
+
+
+def safe_year(v):
+    """
+    Year of a full or partial date, for sources that often only report the
+    year. safe_date() rejects "2014" (there is no honest DATE for it), so
+    without this those records would lose their collection year entirely.
+    Ranges like "2014-2015" stay None -- no single year is correct.
+    """
+    d = safe_date(v)
+    if d is not None:
+        return d.year
+    s = blank_to_none(v)
+    m = _PARTIAL_DATE_RE.fullmatch(s) if s else None
+    return int(m.group(1)) if m else None
 
 
 def hash_file(path: str) -> str:

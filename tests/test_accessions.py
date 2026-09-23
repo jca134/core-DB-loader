@@ -105,7 +105,7 @@ class TestPickField:
         assert pick_field((1, None), (2, None)) == (None, None)
 
     def test_single_candidate_source_only_table(self):
-        # e.g. isolate.country, which only ever comes from NCBI's matched row.
+        # e.g. isolate.geo_location, which only ever comes from NCBI's matched row.
         assert pick_field((2, "Guinea")) == ("Guinea", 2)
         assert pick_field((2, None)) == (None, None)
 

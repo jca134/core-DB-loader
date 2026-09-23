@@ -3,14 +3,14 @@
 import pandas as pd
 from sqlalchemy import text
 
-from core_data_loader.common.db_utils import engine, blank_to_none, safe_int, safe_float, safe_date, clean_columns
+from core_data_loader.common.db_utils import engine, blank_to_none, safe_int, safe_float, safe_date, safe_year, clean_columns
 from core_data_loader.common.sources import SOURCES, ensure_sources
 
 # Re-exported for etl_*.py, which imports its db_utils/sources helpers
 # through this module rather than reaching past the etl_common -> raw_common
 # layering to get them directly.
 __all__ = [
-    "engine", "blank_to_none", "safe_int", "safe_float", "safe_date", "clean_columns",
+    "engine", "blank_to_none", "safe_int", "safe_float", "safe_date", "safe_year", "clean_columns",
     "SOURCES", "ensure_sources",
     "truncate", "read_raw", "raw_table_exists", "write_core",
     "add_xref", "write_xref",
@@ -18,10 +18,55 @@ __all__ = [
 ]
 
 
+# Walks foreign keys outward from `tables` to every table TRUNCATE ... CASCADE
+# would also empty. Recursive because CASCADE is transitive: a table two FK
+# hops away goes too.
+_CASCADE_TARGETS_SQL = """
+WITH RECURSIVE listed AS (
+    SELECT c.oid
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname || '.' || c.relname = ANY(:tables)
+), dependents AS (
+    SELECT con.conrelid AS oid
+    FROM pg_constraint con
+    WHERE con.contype = 'f' AND con.confrelid IN (SELECT oid FROM listed)
+  UNION
+    SELECT con.conrelid
+    FROM pg_constraint con
+    JOIN dependents d ON con.confrelid = d.oid
+    WHERE con.contype = 'f'
+)
+SELECT DISTINCT n.nspname || '.' || c.relname
+FROM dependents d
+JOIN pg_class c ON c.oid = d.oid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname || '.' || c.relname <> ALL(:tables)
+"""
+
+
 def truncate(*tables: str):
+    """
+    TRUNCATE ... RESTART IDENTITY CASCADE over `tables`.
+
+    CASCADE also empties any table with a foreign key into one of these, so
+    the argument list alone understates what is destroyed -- e.g. truncating
+    core.condition takes core.taxon_condition with it, which is seeded by a
+    separate ETL and won't come back on its own. Anything cascaded that the
+    caller didn't list is reported here rather than silently emptied, so a
+    partial rerun can't leave a hole nobody notices.
+    """
     names = ", ".join(tables)
     with engine.begin() as conn:
+        collateral = [
+            (name, conn.execute(text(f"SELECT count(*) FROM {name}")).scalar())
+            for (name,) in conn.execute(text(_CASCADE_TARGETS_SQL), {"tables": list(tables)})
+        ]
         conn.execute(text(f"TRUNCATE {names} RESTART IDENTITY CASCADE"))
+
+    for name, row_count in sorted(collateral):
+        if row_count:
+            print(f"  ! cascaded into {name}: {row_count} rows emptied -- rerun the ETL that seeds it")
 
 
 def read_raw(table: str) -> pd.DataFrame:

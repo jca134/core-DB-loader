@@ -7,7 +7,7 @@ from sqlalchemy import text
 from core_data_loader.common.accessions import base_accession, resolve_bvbrc_duplicate_genomes, pick_field
 from core_data_loader.common.etl_common import (
     engine, ensure_sources, truncate, read_raw, write_core,
-    safe_int, safe_float, safe_date, blank_to_none,
+    safe_int, safe_float, safe_date, safe_year, blank_to_none,
     add_xref, write_xref,
     add_provenance, write_provenance,
 )
@@ -17,6 +17,22 @@ NCBI = "ncbi"
 HFV = "hfv_lanl"
 
 NEUTRALIZING_TRUE = {"y", "yes", "true", "1"}
+NEUTRALIZING_FALSE = {"n", "no", "false", "0"}
+
+# LANL abbreviates the infecting species in its antibody/CTL exports. These are
+# the species-level taxa those abbreviations denote; a mapping is only used if
+# the taxon is actually in the bvbrc taxonomy set (see hfv_species_taxon).
+# MARV uses the renamed Orthomarburgvirus species id. RAVV is Ravn virus, which
+# the bvbrc set only carries as a strain-level taxon under that same species.
+HFV_SPECIES_TAXA = {
+    "EBOV": 186538,   # Zaire ebolavirus
+    "SUDV": 186540,   # Sudan ebolavirus
+    "BDBV": 565995,   # Bundibugyo virus
+    "TAFV": 186541,   # Tai Forest ebolavirus
+    "RESTV": 186539,  # Reston ebolavirus
+    "MARV": 3052505,  # Orthomarburgvirus marburgense
+    "RAVV": 378809,   # Ravn virus - Ravn, Kenya, 1987
+}
 
 
 def hfv_clean(v):
@@ -26,6 +42,31 @@ def hfv_clean(v):
     # "_" gets stored as if it were a real value (e.g. a fake iedb_id xref).
     v = blank_to_none(v)
     return None if v == "_" else v
+
+
+def parse_neutralizing(v):
+    # Tri-state. LANL qualifies some calls by strain ("yes (Mayinga)"), which
+    # is still a yes -- the qualifier belongs in a comment, not the boolean.
+    # "_" and anything unrecognized mean *unknown*, which is NULL: mapping
+    # them to False would assert a non-neutralizing result LANL never made.
+    v = hfv_clean(v)
+    if v is None:
+        return None
+    token = v.split("(")[0].strip().lower()
+    if token in NEUTRALIZING_TRUE:
+        return True
+    if token in NEUTRALIZING_FALSE:
+        return False
+    return None
+
+
+def hfv_species_taxon(ctx, v):
+    """LANL species abbreviation -> bvbrc taxon_id, or None if unresolvable."""
+    v = hfv_clean(v)
+    if not v:
+        return None
+    tid = HFV_SPECIES_TAXA.get(v.split()[0].upper())
+    return tid if tid in ctx.taxon_ids_present else None
 
 
 ENTITY_TYPES_OWNED = ["isolate", "sequence", "feature", "protein", "epitope", "antibody"]
@@ -81,9 +122,9 @@ class BuildContext:
     hfv_sid: int
 
     taxon_ids_present: set = field(default_factory=set)
+    taxon_id_by_name: dict = field(default_factory=dict)  # only names that identify exactly one taxon
 
     genome_id_to_isolate: dict = field(default_factory=dict)
-    ncbi_isolate_accessions: set = field(default_factory=set)
     merged_isolate_count: int = 0
     bvbrc_internal_merged_count: int = 0
 
@@ -96,7 +137,7 @@ class BuildContext:
     patric_id_to_protein: dict = field(default_factory=dict)
     uniprot_to_protein: dict = field(default_factory=dict)
 
-    hfv_epitope_lookup: dict = field(default_factory=dict)  # (protein, sequence) -> epitope_id
+    hfv_epitope_lookup: dict = field(default_factory=dict)  # (protein, sequence, taxon_id) -> epitope_id
 
     epitope_rows: list = field(default_factory=list)
     epitope_assay_rows: list = field(default_factory=list)
@@ -129,21 +170,24 @@ class BuildContext:
 
     def get_or_create_hfv_epitope(self, protein, seq, epitope_type,
                                    host_species=None, organism=None, iedb_id=None,
-                                   raw_table=None, raw_pk=None):
-        key = (blank_to_none(protein), blank_to_none(seq))
+                                   raw_table=None, raw_pk=None, taxon_id=None):
+        # taxon_id is part of the key: the same peptide can be reported against
+        # more than one species, and collapsing those into one row would let
+        # whichever species loaded first own the epitope's taxon.
+        key = (hfv_clean(protein), hfv_clean(seq), taxon_id)
         if key in self.hfv_epitope_lookup:
             return self.hfv_epitope_lookup[key]
         eid = next(self.epitope_id_seq)
         self.epitope_rows.append({
             "epitope_id": eid,
             "protein_id": None,
-            "epitope_sequence": blank_to_none(seq),
+            "epitope_sequence": hfv_clean(seq),
             "start": None,
             "end": None,
-            "epitope_type": epitope_type,
+            "epitope_type": hfv_clean(epitope_type),
             "host_species": host_species,
             "organism": organism,
-            "taxon_id": None,  # no bvbrc taxonomy resolution attempted for hfv-sourced epitopes
+            "taxon_id": taxon_id,
             "source_id": self.hfv_sid,
         })
         add_xref(self.xref_rows, "epitope", eid, self.hfv_sid, "iedb_id", hfv_clean(iedb_id))
@@ -158,6 +202,12 @@ class BuildContext:
 def build_taxon(ctx: BuildContext) -> pd.DataFrame:
     taxonomy = read_raw("bvbrc_taxonomy")
     ctx.taxon_ids_present = set(taxonomy["taxon_id"].map(safe_int).dropna())
+    name_counts = taxonomy["taxon_name"].value_counts()
+    ctx.taxon_id_by_name = {
+        name: safe_int(tid)
+        for name, tid in zip(taxonomy["taxon_name"], taxonomy["taxon_id"])
+        if name_counts[name] == 1 and safe_int(tid) is not None
+    }
 
     def parent_if_present(v):
         pid = safe_int(v)
@@ -221,11 +271,9 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
         gseqs = seqs_by_genome.get(grow.genome_id, [])
 
         # Filoviruses are non-segmented, so a genome matches at most one
-        # NCBI accession in practice. A handful of BV-BRC genome_ids share
-        # an accession with each other (a BV-BRC-side duplicate, not
-        # something this merge is meant to fix) -- only the first one
-        # encountered claims the NCBI match; the rest fall back to
-        # bvbrc-only below, same as before this merge existed.
+        # NCBI accession in practice. BV-BRC genome_ids that share an
+        # accession with each other were already folded into one canonical
+        # genome_id above, so matched_bases is only a guard here.
         nrow = None
         matched_base = None
         for srow in gseqs:
@@ -243,6 +291,8 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
 
         # BV-BRC's own fields win where both sources have one; nrow (the
         # matched NCBI row, or None) only fills what BV-BRC leaves blank.
+        # The exceptions are country and collection date/year, where NCBI is
+        # the GenBank record BV-BRC copies from, so NCBI goes first.
         # _isolate_field() also records, per field, which source's value
         # actually won -- isolate.source_id alone can't say that, since it's
         # always ctx.bvbrc_sid on a merged row even when e.g. country or
@@ -264,6 +314,7 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
             "country": _isolate_field(
                 ctx, iid, "country",
                 (ctx.ncbi_sid, blank_to_none(nrow.country) if nrow else None),
+                (ctx.bvbrc_sid, blank_to_none(grow.isolation_country)),
             ),
             "geo_location": _isolate_field(
                 ctx, iid, "geo_location",
@@ -281,6 +332,12 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
             "collection_date": _isolate_field(
                 ctx, iid, "collection_date",
                 (ctx.ncbi_sid, safe_date(nrow.collection_date) if nrow else None),
+                (ctx.bvbrc_sid, safe_date(grow.collection_date)),
+            ),
+            "collection_year": _isolate_field(
+                ctx, iid, "collection_year",
+                (ctx.ncbi_sid, safe_year(nrow.collection_date) if nrow else None),
+                (ctx.bvbrc_sid, safe_year(grow.collection_date) or safe_year(grow.collection_year)),
             ),
             "genome_status": _isolate_field(
                 ctx, iid, "genome_status",
@@ -295,7 +352,6 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
         })
         if nrow is not None:
             matched_bases.add(matched_base)
-            ctx.ncbi_isolate_accessions.add(nrow.accession)
             add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_isolate_designation", nrow.isolate)
             add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_assembly", nrow.assembly)
             add_xref(ctx.xref_rows, "isolate", iid, ctx.ncbi_sid, "ncbi_sra_accession", nrow.sra_accession)
@@ -331,9 +387,12 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
                     (ctx.ncbi_sid, blank_to_none(seq_nrow.molecule_type) if seq_nrow else None),
                 ),
                 "sequence_type": srow.sequence_type,
+                # NCBI only: bvbrc's topology is linear/circular, a different
+                # fact from the genome segment this column holds (and constant
+                # "linear" across the whole filovirus set, so it carried no
+                # information while masking NCBI's real segment values).
                 "segment": _sequence_field(
                     ctx, sid, "segment",
-                    (ctx.bvbrc_sid, blank_to_none(srow.topology)),
                     (ctx.ncbi_sid, blank_to_none(seq_nrow.segment) if seq_nrow else None),
                 ),
                 "length": _sequence_field(
@@ -382,10 +441,10 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
             continue
 
         iid = next(ctx.isolate_id_seq)
-        ctx.ncbi_isolate_accessions.add(r.accession)
         isolate_rows.append({
             "isolate_id": iid,
-            "taxon_id": None,  # ncbi's taxon ids aren't in the bvbrc taxonomy set, so nothing to resolve against
+            # sequences.csv carries no taxon id, only a species name
+            "taxon_id": ctx.taxon_id_by_name.get(blank_to_none(r.species)),
             "primary_strain_name": r.organism_name,
             "lanl_strain_name": None,
             "species": r.species,
@@ -394,6 +453,7 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
             "host": r.host,
             "tissue_specimen_source": blank_to_none(r.tissue_specimen_source),
             "collection_date": safe_date(r.collection_date),
+            "collection_year": safe_year(r.collection_date),
             "genome_status": r.nuc_completeness,
             "source_id": ctx.ncbi_sid,
             "notes": blank_to_none(r.isolate),
@@ -575,32 +635,32 @@ def build_antibodies(ctx: BuildContext, antibody: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for r in antibody.itertuples(index=False):
         aid = next(ctx.antibody_id_seq)
-        neut_raw = blank_to_none(r.neutralizing)
         rows.append({
             "antibody_id": aid,
             "name": r.antibody_name,
-            "alias": blank_to_none(r.alias),
-            "isotype": blank_to_none(r.isotype),
-            "isolation_host": blank_to_none(r.isolation_host),
-            "neutralizing": (neut_raw.lower() in NEUTRALIZING_TRUE) if neut_raw else None,
-            "donor_outcome": blank_to_none(r.donor_outcome),
-            "immunogen": blank_to_none(r.immunogen),
+            "alias": hfv_clean(r.alias),
+            "isotype": hfv_clean(r.isotype),
+            "isolation_host": hfv_clean(r.isolation_host),
+            "neutralizing": parse_neutralizing(r.neutralizing),
+            "donor_outcome": hfv_clean(r.donor_outcome),
+            "immunogen": hfv_clean(r.immunogen),
             "source_id": ctx.hfv_sid,
         })
         add_xref(ctx.xref_rows, "antibody", aid, ctx.hfv_sid, "iedb_id", hfv_clean(r.iedb_id))
         add_provenance(ctx.provenance_rows, "antibody", aid, ctx.hfv_sid, "hfv_ebola_antibody", r.iedb_id)
 
-        if blank_to_none(r.epitope_location_sequence) or blank_to_none(r.protein):
+        if hfv_clean(r.epitope_location_sequence) or hfv_clean(r.protein):
             eid = ctx.get_or_create_hfv_epitope(
-                r.protein, r.epitope_location_sequence, blank_to_none(r.epitope_type),
+                r.protein, r.epitope_location_sequence, r.epitope_type,
                 iedb_id=r.iedb_id,
                 raw_table="hfv_ebola_antibody", raw_pk=r.iedb_id,
+                taxon_id=hfv_species_taxon(ctx, r.infecting_vaccine_species_and_strain),
             )
             ctx.antibody_epitope_rows.append({
                 "antibody_id": aid,
                 "epitope_id": eid,
                 "protein_id": None,
-                "binding_comment": blank_to_none(r.epitope_and_binding_comment),
+                "binding_comment": hfv_clean(r.epitope_and_binding_comment),
             })
 
     return pd.DataFrame(rows)
@@ -609,23 +669,24 @@ def build_antibodies(ctx: BuildContext, antibody: pd.DataFrame) -> pd.DataFrame:
 def build_ctl_assays(ctx: BuildContext, ctl: pd.DataFrame):
     """Appends T-cell epitope_assay rows (+ hfv-derived epitope rows as needed)."""
     for r in ctl.itertuples(index=False):
-        if not blank_to_none(r.peptide):
+        if not hfv_clean(r.peptide):
             continue
         eid = ctx.get_or_create_hfv_epitope(
             r.protein, r.peptide, "Linear peptide",
-            host_species=blank_to_none(r.host_species_mouse_mus_musculus),
-            organism=blank_to_none(r.species),
+            host_species=hfv_clean(r.host_species_mouse_mus_musculus),
+            organism=hfv_clean(r.species),
             iedb_id=r.iedb_id,
             raw_table="hfv_ebola_ctl", raw_pk=r.iedb_id,
+            taxon_id=hfv_species_taxon(ctx, r.species),
         )
         ctx.epitope_assay_rows.append({
             "epitope_id": eid,
             "assay_type": "T cell",
-            "mhc_allele": blank_to_none(r.hla) or blank_to_none(r.mhc),
-            "host_species": blank_to_none(r.host_species_mouse_mus_musculus),
-            "assay_outcome": blank_to_none(r.assay) or blank_to_none(r.predicted),
+            "mhc_allele": hfv_clean(r.hla) or hfv_clean(r.mhc),
+            "host_species": hfv_clean(r.host_species_mouse_mus_musculus),
+            "assay_outcome": hfv_clean(r.assay) or hfv_clean(r.predicted),
             "total_assays": None,
-            "pmid": blank_to_none(r.pmid),
+            "pmid": hfv_clean(r.pmid),
             "source_id": ctx.hfv_sid,
         })
 
@@ -774,17 +835,20 @@ def main():
     ncbi = read_raw("ncbi_sequences")
     genome_sequence = read_raw("bvbrc_genome_sequence")
     isolate_df, sequence_df = build_isolates_and_sequences(ctx, genome, genome_sequence, ncbi)
+    bvbrc_isolates = len(set(ctx.genome_id_to_isolate.values()))
     write_core(
         isolate_df, "isolate",
-        f" ({len(ctx.genome_id_to_isolate)} bvbrc, {len(ctx.ncbi_isolate_accessions)} ncbi,"
-        f" {ctx.merged_isolate_count} merged bvbrc+ncbi,"
+        f" ({bvbrc_isolates} from bvbrc, of which {ctx.merged_isolate_count} merged with ncbi;"
+        f" {len(isolate_df) - bvbrc_isolates} ncbi-only;"
         f" {ctx.bvbrc_internal_merged_count} bvbrc-internal reloads folded)",
     )
     write_core(pd.DataFrame(ctx.field_source_rows), "isolate_field_source")
     write_core(sequence_df, "sequence")
     write_core(pd.DataFrame(ctx.sequence_field_source_rows), "sequence_field_source")
 
-    genome_feature = read_raw("bvbrc_genome_feature")
+    # BV-BRC's export repeats a few feature rows verbatim (same feature_id,
+    # every column identical); keep one of each.
+    genome_feature = read_raw("bvbrc_genome_feature").drop_duplicates()
     feature_df, protein_df = build_features_and_proteins(ctx, genome_feature)
     write_core(feature_df, "feature")
     write_core(protein_df, "protein", f" ({len(ctx.raw_featureid_to_protein)} CDS/protein-coding)")

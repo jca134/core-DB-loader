@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS core.isolate (
     geo_location        TEXT,               -- finer-grained than country, e.g. NCBI's "USA: California"
     host                TEXT,
     tissue_specimen_source TEXT,
-    collection_date     DATE,
+    collection_date     DATE,               -- only when the source gives a full date
+    collection_year     INTEGER,            -- also set for year-only/year-month dates ("2014", "2014-08")
     genome_status       TEXT,               -- e.g. Complete / Partial
     source_id           INTEGER REFERENCES core.source(source_id),
     notes               TEXT,
@@ -356,6 +357,23 @@ CREATE TABLE IF NOT EXISTS core.taxon_condition (
     PRIMARY KEY (taxon_id, condition_id)
 );
 
+-- core.taxon_condition holds mappings at species rank only; genomes, epitopes
+-- and structures mostly attach to taxa *below* the species (strains, the
+-- legacy "Zaire ebolavirus" node, "Ebola virus", ...). This view gives every
+-- descendant of a mapped taxon that taxon's conditions, so joining on
+-- isolate/epitope/structure.taxon_id works directly. mapped_taxon_id is the
+-- curated row the link was inherited from.
+CREATE OR REPLACE VIEW core.taxon_condition_inherited AS
+WITH RECURSIVE inherited AS (
+    SELECT taxon_id, condition_id, taxon_id AS mapped_taxon_id
+    FROM core.taxon_condition
+  UNION
+    SELECT t.taxon_id, i.condition_id, i.mapped_taxon_id
+    FROM core.taxon t
+    JOIN inherited i ON t.parent_id = i.taxon_id
+)
+SELECT taxon_id, condition_id, mapped_taxon_id FROM inherited;
+
 CREATE TABLE IF NOT EXISTS core.treatment (
     treatment_accession TEXT PRIMARY KEY,
     name                TEXT,
@@ -413,6 +431,15 @@ CREATE INDEX IF NOT EXISTS idx_structure_protein ON core.structure(protein_id);
 CREATE INDEX IF NOT EXISTS idx_epitope_protein ON core.epitope(protein_id);
 CREATE INDEX IF NOT EXISTS idx_epitope_assay_epitope ON core.epitope_assay(epitope_id);
 CREATE INDEX IF NOT EXISTS idx_antibody_epitope_antibody ON core.antibody_epitope(antibody_id);
+-- Reverse-direction lookups. The indexes above cover each FK's "parent -> child"
+-- side; these cover the traversals that actually get run: finding an entity by
+-- its accession (xref_type/xref_value, not entity_id -- see resolve_sequence_id
+-- in etl_ucsc.py), walking epitope -> antibody, and epitope -> taxon -> condition.
+CREATE INDEX IF NOT EXISTS idx_xref_type_value ON core.xref(xref_type, xref_value);
+CREATE INDEX IF NOT EXISTS idx_antibody_epitope_epitope ON core.antibody_epitope(epitope_id);
+CREATE INDEX IF NOT EXISTS idx_epitope_taxon ON core.epitope(taxon_id);
+CREATE INDEX IF NOT EXISTS idx_taxon_condition_condition ON core.taxon_condition(condition_id);
+
 CREATE INDEX IF NOT EXISTS idx_biosample_subject ON core.biosample(subject_accession);
 CREATE INDEX IF NOT EXISTS idx_biosample_study ON core.biosample(study_accession);
 CREATE INDEX IF NOT EXISTS idx_experiment_study ON core.experiment(study_accession);

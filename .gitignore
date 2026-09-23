@@ -11,3 +11,4 @@ __pycache__/
 # Source data downloads and the SerenQA overview doc — not versioned.
 data/
 Overview/
+exports/

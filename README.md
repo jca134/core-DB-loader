@@ -55,7 +55,9 @@ uv run python -m core_data_loader.loaders.load_ncbi
 uv run python -m core_data_loader.loaders.load_ucsc
 ```
 
-Then run the matching ETL script to populate `core.*` from `raw.*`:
+Then run the matching ETL script to populate `core.*` from `raw.*`. Run them
+in this order: `etl_bvbrc_hfv` rebuilds `core.sequence`, which empties
+`core.gene`/`core.gene_domain` (FK cascade), so `etl_ucsc` has to come after it.
 
 ```bash
 uv run python -m core_data_loader.etl.etl_bvbrc_hfv
@@ -70,6 +72,11 @@ Ebola hemorrhagic fever):
 ```bash
 uv run python -m core_data_loader.etl.etl_taxon_condition
 ```
+
+Mappings are made at species rank. To find the conditions for an isolate,
+epitope, or structure, join on the `core.taxon_condition_inherited` view,
+which carries each mapping down to every descendant taxon (strains, legacy
+species names, and so on).
 
 ## Project layout
 
