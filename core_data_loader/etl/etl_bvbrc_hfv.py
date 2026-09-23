@@ -658,21 +658,34 @@ def build_antibodies(ctx: BuildContext, antibody: pd.DataFrame) -> pd.DataFrame:
         # than iedb_id -- 25 of these rows have iedb_id "_", so keying lineage
         # on it left them pointing at no identifiable raw row.
         add_provenance(ctx.provenance_rows, "antibody", aid, ctx.hfv_sid,
-                       "hfv_ebola_antibody", getattr(r, "order", None))
+                       "hfv_ebola_antibody", r.order)
 
-        if hfv_clean(r.epitope_location_sequence) or hfv_clean(r.protein):
+        # An epitope row is minted only when LANL gives an actual location or
+        # sequence -- not merely a protein name. 23 of these rows name just a
+        # protein ("glycoprotein") with epitope_type and iedb_id both "_";
+        # keying those on the protein alone collapsed them into 4 contentless
+        # epitope rows and thereby asserted a shared epitope that nobody had
+        # characterised (11 unrelated anti-GP antibodies pointed at one such
+        # row). core.epitope has no column that could hold the protein name
+        # either -- protein_id never resolves for LANL, whose "glycoprotein"
+        # doesn't identify one of the 63998 accession-keyed core.protein rows --
+        # so those rows carried no information at all. The antibody_epitope link
+        # is still recorded with a null epitope_id, which keeps the binding
+        # comment (14 of the 23 have one).
+        eid = None
+        if hfv_clean(r.epitope_location_sequence):
             eid = ctx.get_or_create_hfv_epitope(
                 r.protein, r.epitope_location_sequence, r.epitope_type,
                 iedb_id=r.iedb_id,
-                raw_table="hfv_ebola_antibody", raw_pk=getattr(r, "order", None),
+                raw_table="hfv_ebola_antibody", raw_pk=r.order,
                 taxon_id=hfv_species_taxon(ctx, r.infecting_vaccine_species_and_strain),
             )
-            ctx.antibody_epitope_rows.append({
-                "antibody_id": aid,
-                "epitope_id": eid,
-                "protein_id": None,
-                "binding_comment": hfv_clean(r.epitope_and_binding_comment),
-            })
+        ctx.antibody_epitope_rows.append({
+            "antibody_id": aid,
+            "epitope_id": eid,
+            "protein_id": None,
+            "binding_comment": hfv_clean(r.epitope_and_binding_comment),
+        })
 
     return pd.DataFrame(rows)
 
