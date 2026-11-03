@@ -12,7 +12,7 @@ from core_data_loader.common.sources import SOURCES, ensure_sources
 __all__ = [
     "engine", "blank_to_none", "safe_int", "safe_float", "safe_date", "safe_year", "clean_columns",
     "SOURCES", "ensure_sources",
-    "truncate", "read_raw", "raw_table_exists", "write_core",
+    "truncate", "read_raw", "raw_table_exists", "write_core", "blank_strings_to_null",
     "add_xref", "write_xref",
     "add_provenance", "write_provenance",
 ]
@@ -73,9 +73,49 @@ def read_raw(table: str) -> pd.DataFrame:
     return pd.read_sql_table(table, engine, schema="raw")
 
 
+def blank_strings_to_null(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Replace '' with None in every text column.
+
+    The loaders read their sources with `keep_default_na=False`, so a blank CSV
+    cell arrives as an empty string rather than NaN. Most build_*() functions
+    pass values through blank_to_none on the way out, but not all of them did,
+    and the ones that didn't were invisible: the row count looked right and the
+    column looked populated.
+
+    It had spread to 17 columns across 8 tables -- 66,206 of core.feature's
+    product values, and 4,903 of core.sequence's 4,907 sequence_type values,
+    were '' rather than NULL. That breaks the ordinary ways of asking whether a
+    value is there: `WHERE product IS NULL` missed every one of them, and
+    `coalesce(product, gene)` returned '' instead of falling through.
+
+    Doing it here rather than at each call site means a new column cannot
+    reintroduce it. '' and NULL both mean "the source had nothing here" in
+    every column of this schema -- there is no column where an empty string is
+    a meaningful value distinct from absence.
+    """
+    # Both dtypes, deliberately. pandas 3 gives a column of Python strings the
+    # `str` dtype, not `object`, so a plain `dtype == object` test skips every
+    # text column built from a list of strings and this function silently does
+    # nothing. `object` is still checked because a mixed or date-bearing column
+    # lands there; `.eq("")` is False throughout such a column, so including it
+    # costs nothing.
+    text_cols = [c for c in df.columns
+                 if pd.api.types.is_string_dtype(df[c]) or df[c].dtype == object]
+    if not text_cols:
+        return df
+    df = df.copy()
+    for c in text_cols:
+        # mask rather than .replace(): only exact empty strings, leaving
+        # whitespace-only values alone for the caller to decide about.
+        df[c] = df[c].mask(df[c].eq(""), None)
+    return df
+
+
 def write_core(df: pd.DataFrame, table: str, note: str = "") -> pd.DataFrame:
     """Appends df to core.<table> and logs the row count -- the standard
     last step of every build_*() in an etl_*.py script."""
+    df = blank_strings_to_null(df)
     df.to_sql(table, engine, schema="core", if_exists="append", index=False)
     print(f"core.{table}: {len(df)} rows{note}")
     return df
@@ -167,12 +207,31 @@ def add_provenance_bulk(provenance_rows: list, df: pd.DataFrame, core_table: str
         add_provenance(provenance_rows, core_table, core_pk, source_id, raw_table, raw_pk)
 
 
-def write_provenance(provenance_rows: list, core_tables: list):
+def write_provenance(provenance_rows: list, core_tables: list, shared_tables: dict = None):
+    """
+    Replace the lineage rows for `core_tables`, which this ETL owns outright.
+
+    `shared_tables` is for a core table two ETLs both write to -- currently only
+    core.publication, which etl_immport populates from its studies and
+    etl_evidence upserts papers onto. Deleting by core_table alone would make
+    each script wipe the other's lineage, and not deleting at all would
+    accumulate a fresh copy on every rerun. So it maps a table name to the
+    source_ids this ETL is responsible for, and only those rows are replaced:
+    {"publication": [pubmed_source_id]}.
+    """
     with engine.begin() as conn:
         conn.execute(
             text("DELETE FROM ops.entity_provenance WHERE core_table = ANY(:tables)"),
             {"tables": core_tables},
         )
+        for table, source_ids in (shared_tables or {}).items():
+            conn.execute(
+                text(
+                    "DELETE FROM ops.entity_provenance "
+                    "WHERE core_table = :table AND source_id = ANY(:source_ids)"
+                ),
+                {"table": table, "source_ids": list(source_ids)},
+            )
     if not provenance_rows:
         print("ops.entity_provenance: 0 rows")
         return

@@ -48,7 +48,13 @@ def safe_float(v):
 
 
 _DATE_FORMATS = (
-    "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S",
+    # The unzoned "...T00:00:00" variant is what NIH RePORTER returns. Without
+    # it every grant date parsed as None and was written to the database as
+    # NULL -- silently, since safe_date's contract is to return None rather
+    # than raise on anything it cannot read. 1,811 project start dates, 1,839
+    # end dates and 1,890 award notice dates were lost that way.
+    "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
     "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%d-%b-%Y",
 )
 

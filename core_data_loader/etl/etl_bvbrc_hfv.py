@@ -497,42 +497,137 @@ def build_isolates_and_sequences(ctx: BuildContext, genome: pd.DataFrame, genome
     return pd.DataFrame(isolate_rows), pd.DataFrame(sequence_rows)
 
 
+def _pipeline_neutral_feature_id(feature_id):
+    """
+    The raw feature_id with its annotation-pipeline prefix removed.
+
+    BV-BRC encodes a feature's whole physical identity in its id --
+    `{pipeline}.{genome_id}.{accession}.{type}.{start}.{end}.{strand}` -- so
+    `PATRIC.186538.3181..regulatory...rev` and `RefSeq.186538.3181..regulatory...rev`
+    are the two pipelines' records of one feature, and stripping the first
+    segment yields exactly the key that pairs them and nothing else.
+    """
+    fid = blank_to_none(feature_id)
+    if fid is None:
+        return None
+    head, sep, rest = fid.partition(".")
+    return rest if sep and head in ("PATRIC", "RefSeq") else fid
+
+
+def _feature_key(ctx: BuildContext, r):
+    """
+    What makes two raw genome_feature rows the same physical feature.
+
+    Keyed on the *resolved* core sequence_id, not the raw one, so this also
+    absorbs the case where BV-BRC reloaded a genome under a second genome_id
+    and resolve_bvbrc_duplicate_genomes() folded both onto one core.sequence.
+
+    When the sequence did NOT resolve, the coordinates cannot be trusted to
+    separate features either: the rows that fail to resolve are exactly the
+    ones BV-BRC exported with a blank accession and blank coordinates
+    (`PATRIC.186538.3181..regulatory...rev`). The first version fell back to the
+    raw sequence_id -- blank on all of them -- so every unanchored feature of a
+    given type merged into one row whatever genome it came from: one
+    core.feature absorbed regulatory features from genomes 3181, 3277 and 3499.
+    The raw feature_id still names the genome, so the fallback keys on it,
+    with the pipeline prefix stripped so PATRIC and RefSeq still pair.
+    """
+    sequence_id = ctx.raw_seqid_to_sequence.get(r.sequence_id)
+    if sequence_id is None:
+        return ("unresolved", _pipeline_neutral_feature_id(r.feature_id))
+    return (
+        ("seq", sequence_id),
+        r.feature_type,
+        safe_int(r.start),
+        safe_int(r.end),
+        r.strand,
+        blank_to_none(r.gene),
+        blank_to_none(r.product),
+    )
+
+
 def build_features_and_proteins(ctx: BuildContext, genome_feature: pd.DataFrame):
-    feature_rows = []
-    protein_rows = []
+    """
+    One core.feature per physical feature, not per raw row.
+
+    BV-BRC's genome_feature.csv carries every feature twice -- once from each
+    annotation pipeline -- at identical coordinates, and encodes which pipeline
+    in the raw feature_id:
+
+        PATRIC.1126254.3.JN408064.CDS.103.2190.fwd   annotation=PATRIC
+        RefSeq.1126254.3.JN408064.CDS.103.2190.fwd   annotation=RefSeq
+
+    Both describe the same CDS and report the same NCBI protein (AEW11935.1),
+    but the identifiers are split between them: only the PATRIC row has a
+    patric_id, only the RefSeq row a refseq_locus_tag. Emitting a row per raw
+    row therefore produced two core.feature rows and two core.protein rows for
+    one real feature, each holding half the identifiers -- 65,840 redundant
+    features across 4,408 sequences, a third of the table.
+
+    The two are merged into one row that carries the xrefs from both, the same
+    way build_isolates_and_sequences() merges a BV-BRC and an NCBI record for
+    one genome. Nothing is discarded: `annotation` lists every pipeline that
+    reported the feature, and ops.entity_provenance still gets a row per raw
+    feature_id, so the lineage back to both source rows survives.
+
+    Note the key includes feature_type, so the separate `gene` row RefSeq emits
+    over the same coordinates as its `CDS` row stays a distinct feature.
+    """
+    features = {}   # key -> feature dict
+    proteins = {}   # key -> protein dict
 
     for r in genome_feature.itertuples(index=False):
-        fid = next(ctx.feature_id_seq)
-        feature_rows.append({
-            "feature_id": fid,
-            "sequence_id": ctx.raw_seqid_to_sequence.get(r.sequence_id),
-            "feature_type": r.feature_type,
-            "start": safe_int(r.start),
-            "end": safe_int(r.end),
-            "strand": r.strand,
-            "gene": blank_to_none(r.gene),
-            "product": r.product,
-            "annotation": r.annotation,
-            "source_id": ctx.bvbrc_sid,
-        })
+        key = _feature_key(ctx, r)
+        feature = features.get(key)
+
+        if feature is None:
+            fid = next(ctx.feature_id_seq)
+            feature = features[key] = {
+                "feature_id": fid,
+                "sequence_id": ctx.raw_seqid_to_sequence.get(r.sequence_id),
+                "feature_type": r.feature_type,
+                "start": safe_int(r.start),
+                "end": safe_int(r.end),
+                "strand": r.strand,
+                "gene": blank_to_none(r.gene),
+                "product": r.product,
+                # Accumulated across the merged rows, then joined below.
+                "annotation": [],
+                "source_id": ctx.bvbrc_sid,
+            }
+        fid = feature["feature_id"]
+
+        annotation = blank_to_none(r.annotation)
+        if annotation and annotation not in feature["annotation"]:
+            feature["annotation"].append(annotation)
+
+        # Provenance is per raw row even though the core row is shared, so both
+        # source records remain traceable.
         add_provenance(ctx.provenance_rows, "feature", fid, ctx.bvbrc_sid, "bvbrc_genome_feature", r.feature_id)
 
         aa_len = safe_int(r.aa_length)
         if aa_len is None:
             continue  # not a protein-coding feature (e.g. UTR, tRNA) — no protein row for it
 
-        pid = next(ctx.protein_id_seq)
+        protein = proteins.get(key)
+        if protein is None:
+            pid = next(ctx.protein_id_seq)
+            protein = proteins[key] = {
+                "protein_id": pid,
+                "feature_id": fid,
+                "sequence_text": None,  # aa sequence isn't carried in genome_feature, only md5/length
+                "aa_length": aa_len,
+                "product": r.product,
+                "gene": blank_to_none(r.gene),
+                "source_id": ctx.bvbrc_sid,
+            }
+        pid = protein["protein_id"]
+
+        # Every raw feature_id in the group resolves to the one protein --
+        # build_structures() looks structures up by raw feature_id, and which
+        # pipeline's row a structure cites is arbitrary.
         ctx.raw_featureid_to_protein[r.feature_id] = pid
         add_provenance(ctx.provenance_rows, "protein", pid, ctx.bvbrc_sid, "bvbrc_genome_feature", r.feature_id)
-        protein_rows.append({
-            "protein_id": pid,
-            "feature_id": fid,
-            "sequence_text": None,  # aa sequence isn't carried in genome_feature, only md5/length
-            "aa_length": aa_len,
-            "product": r.product,
-            "gene": blank_to_none(r.gene),
-            "source_id": ctx.bvbrc_sid,
-        })
 
         ncbi_prot = blank_to_none(r.protein_id)
         if ncbi_prot:
@@ -546,7 +641,45 @@ def build_features_and_proteins(ctx: BuildContext, genome_feature: pd.DataFrame)
 
         add_xref(ctx.xref_rows, "protein", pid, ctx.bvbrc_sid, "refseq_locus_tag", r.refseq_locus_tag)
 
-    return pd.DataFrame(feature_rows), pd.DataFrame(protein_rows)
+    merged = len(genome_feature) - len(features)
+    if merged:
+        print(f"  merged {merged} duplicate annotation rows into {len(features)} features")
+
+    # Sorted so a feature reported by both pipelines always reads
+    # "PATRIC; RefSeq" -- without it the string depends on which row the CSV
+    # happened to list first, and the same merge yields two different values.
+    feature_rows = [{**f, "annotation": "; ".join(sorted(f["annotation"])) or None}
+                    for f in features.values()]
+    return pd.DataFrame(feature_rows), pd.DataFrame(list(proteins.values()))
+
+
+def resolve_taxon(ctx: BuildContext, raw_taxon_id):
+    """
+    core.taxon id for a BV-BRC taxon_id cell, or None.
+
+    For a multi-chain structure BV-BRC joins one taxon per chain with "|", e.g.
+    `10090|186540` -- a mouse antibody bound to a Sudan ebolavirus protein.
+    safe_int() cannot parse that, so every such structure used to lose its
+    organism outright: 53 of the 255 structures, which are the antibody-antigen
+    complexes and so exactly the ones the antibody questions are about. Nine of
+    them had no protein link either and were connected to nothing at all.
+
+    The host or antibody species (human 9606, mouse 10090, llama 9844, yeast
+    4932) is never in core.taxon, which holds BV-BRC's filovirus taxonomy only,
+    so the first id that IS present is the viral one. Where two viral ids are
+    present -- a strain and its species, like 128952 and 1570291 -- either
+    reaches the same disease through core.taxon_condition_inherited; the first
+    is taken so the choice is deterministic. The same "|" convention is why
+    build_structures() already splits uniprotkb_accession.
+    """
+    text_value = blank_to_none(raw_taxon_id)
+    if text_value is None:
+        return None
+    for part in text_value.split("|"):
+        taxon_id = safe_int(part)
+        if taxon_id is not None and taxon_id in ctx.taxon_ids_present:
+            return taxon_id
+    return None
 
 
 def build_structures(ctx: BuildContext, protein_structure: pd.DataFrame) -> pd.DataFrame:
@@ -573,7 +706,7 @@ def build_structures(ctx: BuildContext, protein_structure: pd.DataFrame) -> pd.D
                     ctx.uniprot_to_protein[u] = protein_id
                     add_xref(ctx.xref_rows, "protein", protein_id, ctx.bvbrc_sid, "uniprotkb_accession", u)
 
-        taxon_id = safe_int(r.taxon_id)
+        taxon_id = resolve_taxon(ctx, r.taxon_id)
         structure_id = next(ctx.structure_id_seq)
         rows.append({
             "structure_id": structure_id,
@@ -584,7 +717,7 @@ def build_structures(ctx: BuildContext, protein_structure: pd.DataFrame) -> pd.D
             "title": r.title,
             "release_date": safe_date(r.release_date),
             "organism_name": r.organism_name,
-            "taxon_id": taxon_id if taxon_id in ctx.taxon_ids_present else None,
+            "taxon_id": taxon_id,
             "source_id": ctx.bvbrc_sid,
             "sequence_text": blank_to_none(r.sequence),
         })
@@ -598,7 +731,7 @@ def build_bvbrc_epitopes(ctx: BuildContext, epitope: pd.DataFrame):
     for r in epitope.itertuples(index=False):
         eid = next(ctx.epitope_id_seq)
         protein_id = ctx.resolve_protein(ncbi_protein_id=r.protein_id, uniprot_accession=r.protein_accession)
-        epitope_taxon_id = safe_int(r.taxon_id)
+        epitope_taxon_id = resolve_taxon(ctx, r.taxon_id)
         ctx.epitope_rows.append({
             "epitope_id": eid,
             "protein_id": protein_id,
@@ -608,7 +741,7 @@ def build_bvbrc_epitopes(ctx: BuildContext, epitope: pd.DataFrame):
             "epitope_type": r.epitope_type,
             "host_species": r.host_name,
             "organism": r.organism,
-            "taxon_id": epitope_taxon_id if epitope_taxon_id in ctx.taxon_ids_present else None,
+            "taxon_id": epitope_taxon_id,
             "source_id": ctx.bvbrc_sid,
         })
         add_xref(ctx.xref_rows, "epitope", eid, ctx.bvbrc_sid, "bvbrc_epitope_id", r.epitope_id)
@@ -872,10 +1005,24 @@ def main():
 
     # BV-BRC's export repeats a few feature rows verbatim (same feature_id,
     # every column identical); keep one of each.
-    genome_feature = read_raw("bvbrc_genome_feature").drop_duplicates()
+    # BV-BRC's export contains byte-identical duplicate rows (24 of them in the
+    # current pull: 48 rows sharing 24 feature_ids, every column equal). Those
+    # carry no information and are dropped -- but counted, so the log accounts
+    # for every raw row: raw = exact duplicates + annotation-pipeline merges
+    # + features written. Without the count, 24 rows vanished between raw and
+    # core with nothing saying where they went.
+    genome_feature_raw = read_raw("bvbrc_genome_feature")
+    genome_feature = genome_feature_raw.drop_duplicates()
+    exact_dupes = len(genome_feature_raw) - len(genome_feature)
+    if exact_dupes:
+        print(f"  dropped {exact_dupes} byte-identical duplicate rows "
+              f"from raw.bvbrc_genome_feature ({len(genome_feature_raw)} -> {len(genome_feature)})")
     feature_df, protein_df = build_features_and_proteins(ctx, genome_feature)
     write_core(feature_df, "feature")
-    write_core(protein_df, "protein", f" ({len(ctx.raw_featureid_to_protein)} CDS/protein-coding)")
+    # raw_featureid_to_protein is keyed by raw row, and several raw rows now
+    # share one protein, so its length is the number of source rows behind
+    # these proteins rather than a second count of the proteins themselves.
+    write_core(protein_df, "protein", f" (from {len(ctx.raw_featureid_to_protein)} CDS/protein-coding source rows)")
 
     protein_structure = read_raw("bvbrc_protein_structure")
     write_core(build_structures(ctx, protein_structure), "structure")

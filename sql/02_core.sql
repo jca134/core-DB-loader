@@ -226,9 +226,35 @@ CREATE TABLE IF NOT EXISTS core.antibody_epitope (
     antibody_epitope_id BIGSERIAL PRIMARY KEY,
     antibody_id         BIGINT NOT NULL REFERENCES core.antibody(antibody_id),
     epitope_id          BIGINT REFERENCES core.epitope(epitope_id),
+    -- Never populated. LANL names the target as a bare product ("glycoprotein"),
+    -- which cannot pick one of the 32004 accession-keyed core.protein rows, and
+    -- no other source writes this table. Kept because a future antibody source
+    -- that does carry an accession would fill it; see target_gene_id below for
+    -- the link that can actually be made from the data we have.
     protein_id          BIGINT REFERENCES core.protein(protein_id),
     binding_comment     TEXT
 );
+
+-- The antibody's target at gene granularity, which is the level LANL actually
+-- reports. 148 of the 149 rows name a product that maps onto UCSC's nine-row
+-- reference gene model (glycoprotein -> GP, nucleoprotein -> NP, VP35, VP40);
+-- the one exception is literally "unknown". Without this the question "which
+-- antibodies target GP" is unanswerable: protein_id is always null and
+-- epitope_id exists for only 126 of the rows.
+--
+-- The SYMBOL, not core.gene.gene_id, and deliberately so. gene_id is a
+-- surrogate that etl_ucsc regenerates on every run, and a real FK to it made
+-- core.antibody_epitope a dependent of core.gene -- so etl_ucsc's
+-- `TRUNCATE core.gene CASCADE` emptied all 149 rows, destroying the
+-- antibody-to-epitope links as collateral. A stable natural key cannot be
+-- invalidated that way, and joining `ON g.gene_symbol = ae.target_gene_symbol`
+-- costs nothing. Same reasoning as core.taxon.taxon_id holding a real NCBI id
+-- rather than a surrogate. sql/checks.sql verifies every symbol resolves.
+ALTER TABLE core.antibody_epitope
+    ADD COLUMN IF NOT EXISTS target_gene_symbol TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_antibody_epitope_target_gene
+    ON core.antibody_epitope(target_gene_symbol);
 
 CREATE TABLE IF NOT EXISTS core.alignment (
     alignment_id    BIGSERIAL PRIMARY KEY,
@@ -423,11 +449,45 @@ CREATE TABLE IF NOT EXISTS core.study_publication (
     PRIMARY KEY (study_accession, publication_id)
 );
 
+-- ---------------------------------------------------------------------------
+-- Enforced invariants
+-- ---------------------------------------------------------------------------
+-- sql/checks.sql detects violations after a load; these prevent them during
+-- one. Only invariants whose violation is ALWAYS a bug are enforced here -- a
+-- constraint a legitimate future source could break would turn a data question
+-- into a failed load, so the judgement calls stay in checks.sql.
+--
+-- A PDB id identifies one deposited structure, and a BV-BRC computed model id
+-- (fig|...) identifies one model. Two rows sharing either means the ETL
+-- duplicated a structure, which is the failure this whole schema keeps
+-- relearning -- better a loud failure than a silent double.
+DO $$ BEGIN
+    ALTER TABLE core.structure ADD CONSTRAINT structure_pdb_id_key UNIQUE (pdb_id);
+EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL; END $$;
+
+-- core.gene is UCSC's single reference model: exactly one row per gene.
+DO $$ BEGIN
+    ALTER TABLE core.gene ADD CONSTRAINT gene_symbol_key UNIQUE (gene_symbol);
+EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL; END $$;
+
+-- A non-positive length is never a real measurement. NULL stays allowed:
+-- plenty of sources genuinely do not report one.
+DO $$ BEGIN
+    ALTER TABLE core.sequence ADD CONSTRAINT sequence_length_positive CHECK (length IS NULL OR length > 0);
+EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE core.protein ADD CONSTRAINT protein_aa_length_positive CHECK (aa_length IS NULL OR aa_length > 0);
+EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL; END $$;
+
 CREATE INDEX IF NOT EXISTS idx_isolate_taxon ON core.isolate(taxon_id);
 CREATE INDEX IF NOT EXISTS idx_sequence_isolate ON core.sequence(isolate_id);
 CREATE INDEX IF NOT EXISTS idx_feature_sequence ON core.feature(sequence_id);
 CREATE INDEX IF NOT EXISTS idx_protein_feature ON core.protein(feature_id);
 CREATE INDEX IF NOT EXISTS idx_structure_protein ON core.structure(protein_id);
+-- structure.taxon_id is a declared traversal (a structure's organism) and
+-- Postgres does not index foreign keys automatically.
+CREATE INDEX IF NOT EXISTS idx_structure_taxon ON core.structure(taxon_id);
 CREATE INDEX IF NOT EXISTS idx_epitope_protein ON core.epitope(protein_id);
 CREATE INDEX IF NOT EXISTS idx_epitope_assay_epitope ON core.epitope_assay(epitope_id);
 CREATE INDEX IF NOT EXISTS idx_antibody_epitope_antibody ON core.antibody_epitope(antibody_id);

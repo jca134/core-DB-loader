@@ -35,3 +35,20 @@ class TestSafeInt:
     def test_overflowing_float_is_none(self):
         assert safe_int("inf") is None
         assert safe_int("1e400") is None
+
+
+def test_safe_date_parses_unzoned_iso_timestamps():
+    # NIH RePORTER's format. Previously unhandled, so every grant date in the
+    # database was silently NULL -- safe_date returns None rather than raising,
+    # which makes a missing format invisible until someone queries the column.
+    assert safe_date("2008-09-26T00:00:00") == date(2008, 9, 26)
+    assert safe_date("2016-04-09T00:00:00") == date(2016, 4, 9)
+
+
+def test_safe_date_still_parses_the_zoned_variants():
+    assert safe_date("2014-08-01T00:00:00Z") == date(2014, 8, 1)
+    assert safe_date("2014-08-01T00:00:00.000Z") == date(2014, 8, 1)
+
+
+def test_safe_year_reads_unzoned_iso_timestamps_too():
+    assert safe_year("2008-09-26T00:00:00") == 2008

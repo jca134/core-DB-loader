@@ -21,6 +21,14 @@ SOURCES = [
     ("immport_sdy1373", "ImmPort SDY1373", "https://www.immport.org", "ImmPort study SDY1373"),
     ("immport_sdy1932", "ImmPort SDY1932", "https://www.immport.org", "ImmPort study SDY1932"),
     ("immport_sdy1976", "ImmPort SDY1976", "https://www.immport.org", "ImmPort study SDY1976"),
+    # Evidence layer (sql/04_evidence.sql): grants, patents, papers.
+    ("nih_reporter", "NIH RePORTER", "https://reporter.nih.gov", "Federally funded research projects from the RePORTER v2 API"),
+    ("uspto", "USPTO Patent Full-Text Search", "https://ppubs.uspto.gov", "USPTO search exports, CPC-filtered for filovirus vaccines/antibodies"),
+    ("pubmed", "PubMed", "https://pubmed.ncbi.nlm.nih.gov", "Research papers reached from identifiers already in the KG"),
+    # Attributed separately so a paper link found by looking an identifier up in
+    # RCSB or IEDB doesn't appear to have come from BV-BRC or LANL.
+    ("rcsb_pdb", "RCSB PDB", "https://www.rcsb.org", "RCSB structure citations resolved via the GraphQL API"),
+    ("iedb", "IEDB", "https://www.iedb.org", "IEDB epitope references resolved via the Query API"),
 ]
 
 

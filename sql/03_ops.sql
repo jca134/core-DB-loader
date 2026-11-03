@@ -37,3 +37,6 @@ CREATE TABLE IF NOT EXISTS ops.entity_provenance (
 
 CREATE INDEX IF NOT EXISTS idx_entity_provenance_core ON ops.entity_provenance(core_table, core_pk);
 CREATE INDEX IF NOT EXISTS idx_ingest_file_batch ON ops.ingest_file(batch_id);
+-- "what did this file produce" over 300k provenance rows was a parallel seq
+-- scan without this.
+CREATE INDEX IF NOT EXISTS idx_entity_provenance_ingest_file ON ops.entity_provenance(ingest_file_id);
