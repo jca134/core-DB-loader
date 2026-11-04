@@ -75,51 +75,6 @@ ASSAY_TYPES = [
      ["transcription profiling by array", "gene expression microarray", "expression microarray"]),
 ]
 
-# Disease search terms for grant/paper keyword matching. Export-only: these are
-# not seeded into core.condition (ImmPort owns that table; today it holds only
-# DOID:4325). entity_ids are ontology ids, checked on EBI OLS 2026-11-03.
-# (canonical name, entity_ids, note, [(search_term, scope, requires_context)])
-CONDITION_TERMS = [
-    ("Ebola virus disease", "DOID:4325", "in core.condition (ImmPort label: Ebola hemorrhagic fever)", [
-        ("ebola virus disease", "include", False),
-        ("ebola hemorrhagic fever", "include", False),
-        ("ebola haemorrhagic fever", "include", False),
-        ("ebola disease", "include", False),
-        ("evd", "include", True),
-        # DOID lists bare "Ebola" as a synonym, but it names the virus: every
-        # filovirus grant would link to the disease.
-        ("ebola", "exclude", True),
-    ]),
-    ("Marburg virus disease", "DOID:4327",
-     "DOID label: Marburg hemorrhagic fever; not yet in core.condition", [
-        ("marburg virus disease", "include", False),
-        ("marburg hemorrhagic fever", "include", False),
-        ("marburg haemorrhagic fever", "include", False),
-        ("marburg disease", "include", False),
-        ("mvd", "include", True),
-    ]),
-    ("Sudan virus disease", "DOID:4325",
-     "no DOID/MONDO term of its own; DOID:4325's definition includes Sudan virus", [
-        ("sudan virus disease", "include", False),
-        ("sudan ebola virus disease", "include", False),
-        # SVD is also singular value decomposition.
-        ("svd", "review", True),
-    ]),
-    ("Filovirus disease", "DOID:4325|DOID:4327",
-     "no DOID/MONDO term; DOID goes EVD -> viral infectious disease. Mapped to both member diseases", [
-        ("filovirus disease", "review", False),
-        ("filoviral disease", "review", False),
-        ("filovirus infection", "review", False),
-    ]),
-    ("Viral hemorrhagic fever", "MONDO:0018087",
-     "not in DOID; MONDO id. Broad: also covers Lassa, dengue, CCHF -- a hub, not a link between documents", [
-        ("viral hemorrhagic fever", "include", False),
-        ("viral haemorrhagic fever", "include", False),
-        ("viral hemorrhagic fevers", "include", False),
-        ("vhf", "include", True),
-    ]),
-]
-
 # IEDB's category values -> assay_type name.
 IEDB_CATEGORY = {
     "T cell": "T cell epitope assay",

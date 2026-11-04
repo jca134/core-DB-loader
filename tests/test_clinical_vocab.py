@@ -106,15 +106,3 @@ def test_vocab_ids_parents_and_synonyms(vocab, prefix):
     for name, _id, _parent, synonyms in vocab:
         for s in [name.lower(), *synonyms]:
             assert owner.setdefault(s, name) == name, f"{s!r} names {owner[s]} and {name}"
-
-
-def test_condition_terms_use_ontology_ids_and_valid_scopes():
-    from core_data_loader.common.clinical_vocab import CONDITION_TERMS
-    seen = set()
-    for _name, entity_ids, _note, terms in CONDITION_TERMS:
-        for i in entity_ids.split("|"):
-            assert re.fullmatch(r"(DOID:\d+|MONDO:\d{7})", i)
-        for term, scope, _ctx in terms:
-            assert scope in {"include", "review", "exclude"}
-            assert term == term.lower() and term not in seen
-            seen.add(term)

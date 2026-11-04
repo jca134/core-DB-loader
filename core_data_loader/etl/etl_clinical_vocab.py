@@ -10,28 +10,19 @@ them to the rows whose text names them:
 Run after etl_bvbrc_hfv and etl_immport: they truncate core.isolate,
 core.epitope_assay and core.experiment, and the CASCADE empties these link
 tables. run_all.py encodes the order; sql/checks.sql flags an emptied table.
-
-Also writes exports/kg_clinical_terms.csv in kg_keywords.csv's layout --
-symptoms, assay types, and disease terms (CONDITION_TERMS) -- so grant/paper
-keyword matching can use the same terms. entity_ids there are the
-HPO / OBI ids (stable), not this DB's surrogate ids.
 """
-
-import csv
-import os
 
 from sqlalchemy import text
 
 from core_data_loader.common.accessions import base_accession
 from core_data_loader.common.clinical_vocab import (
-    ASSAY_TYPES, CONDITION_TERMS, IEDB_CATEGORY, SYMPTOMS,
+    IEDB_CATEGORY,
     ensure_vocab, match_assay_name, parse_ctl_methods, parse_symptoms,
 )
 from core_data_loader.common.db_utils import engine
 from core_data_loader.common.etl_common import raw_table_exists, read_raw
 
 ANNOTATION_TABLE = "hfv_ebola_annotation_web"
-EXPORT_PATH = "exports/kg_clinical_terms.csv"
 
 
 def link_isolate_symptoms(conn, symptom_ids) -> None:
@@ -126,48 +117,6 @@ def link_epitope_assays(conn, assay_ids) -> None:
         print(f"  (CTL assay text names no known method: {text_value!r} x{n})")
 
 
-def write_export(path=EXPORT_PATH) -> int:
-    """kg_keywords.csv's columns, one row per search term."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    rows = []
-    for entity_type, vocab, id_label in (("symptom", SYMPTOMS, "HPO"), ("assay_type", ASSAY_TYPES, "OBI")):
-        for name, ext_id, parent, synonyms in vocab:
-            terms = dict.fromkeys([name.lower(), *synonyms])  # ordered, deduped
-            for term in terms:
-                short = len(term) <= 4
-                rows.append({
-                    "entity_type": entity_type,
-                    "canonical_name": name,
-                    "search_term": term,
-                    "term_type": "db_name" if term == name.lower() else "synonym",
-                    "scope": "include",
-                    # 'ics', 'pcr', 'icc' collide with unrelated text
-                    "requires_context": "TRUE" if short else "FALSE",
-                    "entity_ids": ext_id or "",
-                    "source": f"core.{entity_type} (common/clinical_vocab.py)",
-                    "notes": (f"no {id_label} term at this granularity" if not ext_id else "")
-                             + (f"; kind of {parent}" if parent else ""),
-                })
-    for name, entity_ids, note, terms in CONDITION_TERMS:
-        for term, scope, requires_context in terms:
-            rows.append({
-                "entity_type": "condition",
-                "canonical_name": name,
-                "search_term": term,
-                "term_type": "db_name" if term == name.lower() else "synonym",
-                "scope": scope,
-                "requires_context": "TRUE" if requires_context else "FALSE",
-                "entity_ids": entity_ids,
-                "source": "Disease Ontology / MONDO (common/clinical_vocab.py)",
-                "notes": note,
-            })
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-    return len(rows)
-
-
 def main():
     with engine.begin() as conn:
         symptom_ids, assay_ids = ensure_vocab(conn)
@@ -175,7 +124,6 @@ def main():
         link_isolate_symptoms(conn, symptom_ids)
         link_experiment_assays(conn, assay_ids)
         link_epitope_assays(conn, assay_ids)
-    print(f"{EXPORT_PATH}: {write_export()} search terms")
 
 
 if __name__ == "__main__":

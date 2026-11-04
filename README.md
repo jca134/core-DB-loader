@@ -167,9 +167,8 @@ nothing.
 Symptoms and assay types are nodes too (`core.symptom`, `core.assay_type`),
 seeded from the curated lists in `common/clinical_vocab.py` with HPO / OBI ids,
 and linked to isolates, ImmPort experiments and epitope assays by
-`etl_clinical_vocab`. It also writes `exports/kg_clinical_terms.csv`, the same
-terms in `kg_keywords.csv`'s layout, for keyword matching against grant and
-paper text. Use the HPO/OBI ids from that file, not the surrogate ids.
+`etl_clinical_vocab`. Outside this DB, refer to them by their HPO/OBI ids,
+not the surrogate ids.
 
 After any ETL run, verify the database with the data-quality checks. Every
 count the report prints should be 0:
