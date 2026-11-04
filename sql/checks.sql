@@ -47,9 +47,14 @@ WITH checks AS (
      OR (entity_type='condition'   AND NOT EXISTS (SELECT 1 FROM core.condition   t WHERE t.condition_id::text   = el.entity_id))
      OR (entity_type='structure'   AND NOT EXISTS (SELECT 1 FROM core.structure   t WHERE t.structure_id::text   = el.entity_id))
      OR (entity_type='isolate'     AND NOT EXISTS (SELECT 1 FROM core.isolate     t WHERE t.isolate_id::text     = el.entity_id))
+     OR (entity_type='sequence'    AND NOT EXISTS (SELECT 1 FROM core.sequence    t WHERE t.sequence_id::text    = el.entity_id))
      OR (entity_type='feature'     AND NOT EXISTS (SELECT 1 FROM core.feature     t WHERE t.feature_id::text     = el.entity_id))
      OR (entity_type='study'       AND NOT EXISTS (SELECT 1 FROM core.study       t WHERE t.study_accession      = el.entity_id))
      OR (entity_type='publication' AND NOT EXISTS (SELECT 1 FROM core.publication t WHERE t.publication_id::text = el.entity_id))
+     OR (entity_type='grant_award' AND NOT EXISTS (SELECT 1 FROM core.grant_award t WHERE t.grant_award_id::text = el.entity_id))
+     OR (entity_type='patent'      AND NOT EXISTS (SELECT 1 FROM core.patent      t WHERE t.patent_id::text      = el.entity_id))
+     OR (entity_type='symptom'     AND NOT EXISTS (SELECT 1 FROM core.symptom     t WHERE t.symptom_id::text     = el.entity_id))
+     OR (entity_type='assay_type'  AND NOT EXISTS (SELECT 1 FROM core.assay_type  t WHERE t.assay_type_id::text  = el.entity_id))
 
   UNION ALL
   SELECT 'evidence_link -> missing document', count(*),
@@ -126,6 +131,25 @@ WITH checks AS (
   FROM core.taxon_condition
 
   UNION ALL
+  -- Same failure shape for the clinical-vocabulary links: each is cascaded
+  -- away by an upstream truncate. A link table is only flagged when its
+  -- source rows exist, so a database without ImmPort/LANL loaded stays clean.
+  SELECT 'isolate_symptom empty',
+         CASE WHEN NOT EXISTS (SELECT 1 FROM core.isolate_symptom)
+               AND to_regclass('raw.hfv_ebola_annotation_web') IS NOT NULL THEN 1 ELSE 0 END,
+         'rerun etl_clinical_vocab (etl_bvbrc_hfv truncates core.isolate)'
+  UNION ALL
+  SELECT 'experiment_assay_type empty',
+         CASE WHEN NOT EXISTS (SELECT 1 FROM core.experiment_assay_type)
+               AND EXISTS (SELECT 1 FROM core.experiment) THEN 1 ELSE 0 END,
+         'rerun etl_clinical_vocab (etl_immport truncates core.experiment)'
+  UNION ALL
+  SELECT 'epitope_assay_assay_type empty',
+         CASE WHEN NOT EXISTS (SELECT 1 FROM core.epitope_assay_assay_type)
+               AND EXISTS (SELECT 1 FROM core.epitope_assay) THEN 1 ELSE 0 END,
+         'rerun etl_clinical_vocab (etl_bvbrc_hfv truncates core.epitope_assay)'
+
+  UNION ALL
   SELECT 'antibody targets unresolved', count(*),
          'rerun etl_antibody_target (etl_bvbrc_hfv rebuilds antibody_epitope)'
   FROM core.antibody_epitope ae
@@ -180,6 +204,17 @@ WITH checks AS (
   UNION ALL
   SELECT 'raw->core: papers', abs((SELECT count(*) FROM raw.papers_unique) - (SELECT count(*) FROM core.publication WHERE source_id = (SELECT source_id FROM core.source WHERE source_code='pubmed'))),
          'every paper in the bundle should become one core.publication row'
+  UNION ALL
+  -- A paper that entered through a grant's citation list exists only because
+  -- a grant cites it, so it must keep that edge. One without it means the
+  -- cites step dropped it (award key mismatch) or a stale row was left behind.
+  SELECT 'grant-cited paper with no cites edge', count(*),
+         'a core.publication added from RePORTER citations is cited by no grant'
+  FROM core.publication p
+  WHERE p.source_id = (SELECT source_id FROM core.source WHERE source_code='nih_reporter')
+    AND NOT EXISTS (SELECT 1 FROM core.evidence_link el
+                    WHERE el.relation = 'cites' AND el.entity_type = 'publication'
+                      AND el.entity_id = p.publication_id::text)
 
   UNION ALL
   -- Features are many-to-one by design (pipeline pairs merge), so they cannot

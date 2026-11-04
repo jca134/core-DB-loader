@@ -150,3 +150,19 @@ class TestBuildAntibodies:
         ))
         ab = [p for p in ctx.provenance_rows if p["core_table"] == "antibody"]
         assert [p["raw_pk"] for p in ab] == ["11"]
+
+
+# --- ctl_assay_method -------------------------------------------------------
+# The CTL file's `assay` column is a method and goes to
+# epitope_assay.assay_method; it used to be written into assay_outcome.
+
+from core_data_loader.etl.etl_bvbrc_hfv import ctl_assay_method
+
+
+def test_ctl_assay_method_keeps_the_method_text():
+    assert ctl_assay_method("IFNg ICC, lytic activity, EliSpot") == "IFNg ICC, lytic activity, EliSpot"
+
+
+def test_ctl_assay_method_treats_lanl_placeholders_as_null():
+    for placeholder in ("NA", "na", "_", "", None):
+        assert ctl_assay_method(placeholder) is None

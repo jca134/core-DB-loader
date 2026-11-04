@@ -31,7 +31,8 @@ including which schema decisions that algorithm drives.
    createdb filovirus
    psql -d filovirus -f sql/01_schemas.sql -f sql/02_core.sql \
                      -f sql/03_ops.sql \
-                     -f sql/04_evidence.sql
+                     -f sql/04_evidence.sql \
+                     -f sql/05_clinical_vocab.sql
    ```
 
 3. Point the scripts at your database. By default they connect to
@@ -135,6 +136,16 @@ picks up automatically on later runs:
 uv run python -m core_data_loader.loaders.fetch_grant_publications
 ```
 
+That list cites ~20k papers, almost none of them in the papers bundle. A
+second fetch pulls their PubMed records (title, abstract, MeSH); `etl_evidence`
+then adds the filovirus ones (~1,270: a filovirus term in the title or MeSH,
+or twice in the abstract) to `core.publication`, so their citations become
+edges instead of being dropped. Run it after `fetch_grant_publications`:
+
+```bash
+uv run python -m core_data_loader.loaders.fetch_cited_publications
+```
+
 Papers need one too. PubMed supplies the titles and years the papers bundle
 doesn't carry; without it every paper node is labelled `PMID 28854372` and has
 no date, which keeps papers out of any temporal analysis:
@@ -146,8 +157,19 @@ uv run python -m core_data_loader.loaders.fetch_publication_metadata
 Evidence links are not all equally strong. A link built from an exact
 identifier carries `confidence = 1.0`; one built from a keyword in a grant
 abstract or patent title carries less, and every link records the term and
-field that produced it in `core.evidence_link_support`. Use `core.v_evidence_cooccurrence` to find two documents that reach the same
-entity — a grant and a patent concerning the same taxon, for instance.
+field that produced it in `core.evidence_link_support`.
+
+Documents link to each other directly in `core.evidence_link` (a grant citing a
+paper, for instance), not through a shared entity: pairing documents that
+mention the same taxon connected 87% of all grant/patent pairs and told you
+nothing.
+
+Symptoms and assay types are nodes too (`core.symptom`, `core.assay_type`),
+seeded from the curated lists in `common/clinical_vocab.py` with HPO / OBI ids,
+and linked to isolates, ImmPort experiments and epitope assays by
+`etl_clinical_vocab`. It also writes `exports/kg_clinical_terms.csv`, the same
+terms in `kg_keywords.csv`'s layout, for keyword matching against grant and
+paper text. Use the HPO/OBI ids from that file, not the surrogate ids.
 
 After any ETL run, verify the database with the data-quality checks. Every
 count the report prints should be 0:

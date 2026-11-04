@@ -14,6 +14,9 @@ database that looks fine and is quietly wrong:
     has to follow it.
   * etl_immport truncates core.condition, which CASCADEs into
     core.taxon_condition, so etl_taxon_condition has to follow it.
+  * etl_bvbrc_hfv truncates core.isolate and core.epitope_assay, and
+    etl_immport truncates core.experiment; each CASCADEs into a
+    clinical-vocabulary link table, so etl_clinical_vocab has to follow both.
   * etl_evidence resolves links to live primary keys for gene, antibody,
     epitope, structure, isolate, feature and condition -- every one of them a
     surrogate that an earlier script regenerates -- so it has to run last.
@@ -51,6 +54,8 @@ STEPS = [
      "curated taxon→disease — after etl_immport, which cascades core.taxon_condition away"),
     ("core_data_loader.etl.etl_antibody_target",
      "curated antibody→gene — after etl_bvbrc_hfv, which rebuilds core.antibody_epitope"),
+    ("core_data_loader.etl.etl_clinical_vocab",
+     "symptom/assay-type nodes — after etl_bvbrc_hfv and etl_immport, which cascade its link tables away"),
     ("core_data_loader.etl.etl_evidence",
      "grants, patents, papers — last, because it resolves links to every other table's keys"),
 ]

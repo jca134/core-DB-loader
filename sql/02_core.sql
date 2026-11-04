@@ -204,7 +204,12 @@ CREATE TABLE IF NOT EXISTS core.epitope_assay (
     assay_type       TEXT,
     mhc_allele       TEXT,
     host_species     TEXT,
-    assay_outcome    TEXT,
+    assay_outcome    TEXT,             -- a result, e.g. BV-BRC's "positive/total" ("1/3")
+    -- How the epitope was tested, e.g. LANL CTL's "IFNg ICC, lytic activity,
+    -- EliSpot". Used to be written into assay_outcome, mixing methods and
+    -- results in one column. etl_clinical_vocab parses it into
+    -- core.epitope_assay_assay_type.
+    assay_method     TEXT,
     total_assays     INTEGER,
     pmid             TEXT,
     source_id        INTEGER REFERENCES core.source(source_id)
@@ -490,6 +495,8 @@ CREATE INDEX IF NOT EXISTS idx_structure_protein ON core.structure(protein_id);
 CREATE INDEX IF NOT EXISTS idx_structure_taxon ON core.structure(taxon_id);
 CREATE INDEX IF NOT EXISTS idx_epitope_protein ON core.epitope(protein_id);
 CREATE INDEX IF NOT EXISTS idx_epitope_assay_epitope ON core.epitope_assay(epitope_id);
+-- Existing databases: CREATE TABLE IF NOT EXISTS won't add the column.
+ALTER TABLE core.epitope_assay ADD COLUMN IF NOT EXISTS assay_method TEXT;
 CREATE INDEX IF NOT EXISTS idx_antibody_epitope_antibody ON core.antibody_epitope(antibody_id);
 -- Reverse-direction lookups. The indexes above cover each FK's "parent -> child"
 -- side; these cover the traversals that actually get run: finding an entity by

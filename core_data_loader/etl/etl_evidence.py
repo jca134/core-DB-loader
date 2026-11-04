@@ -53,6 +53,7 @@ XREF_ENTITY_TYPES_OWNED = ["grant_award", "grant_funding", "patent", "publicatio
 
 GRANTS_TABLE = "nih_reporter_grants"
 GRANT_PUBS_TABLE = "nih_reporter_grant_publications"
+CITED_PUBS_TABLE = "nih_reporter_cited_publications"
 PATENTS_TABLE = "uspto_patents"
 PAPERS_TABLE = "papers_unique"
 PAPER_REFS_TABLE = "papers_references"
@@ -399,11 +400,113 @@ def build_grants(conn, matcher, links, xref_rows, provenance_rows, sid):
     return award_ids
 
 
+def is_filovirus_paper(title: str, mesh_terms: str, abstract: str) -> bool:
+    """
+    Whether a grant-cited paper is about filoviruses: a filovirus term in the
+    title or MeSH headings, or 2+ mentions in the abstract.
+
+    One abstract mention is not enough. On the current data that rule would add
+    170 papers, and they are mostly passing mentions ("blocked replication of
+    other RNA viruses, including Ebola virus"). Two mentions is the same
+    threshold relevance_tier() uses for a 'moderate' grant.
+    """
+    if FILOVIRUS_TITLE_RE.search(title or "") or FILOVIRUS_TITLE_RE.search(mesh_terms or ""):
+        return True
+    return len(FILOVIRUS_TITLE_RE.findall(abstract or "")) >= 2
+
+
+def build_cited_papers(conn, xref_rows, provenance_rows, sid, bundle_pmids=()):
+    """
+    core.publication rows for the filovirus papers grants cite that the papers
+    workstream didn't reach. Without them build_grant_publication_links drops
+    every citation outside the original 300 (22,431 of 22,667).
+
+    These get source_id = nih_reporter, not pubmed: the source records how a
+    paper entered the KG, and these entered through a grant. It also keeps the
+    'raw->core: papers' check in sql/checks.sql an exact count of the bundle.
+
+    Upserted like build_papers, since a cited paper can already exist (ImmPort,
+    or the papers bundle -- fetch_cited_publications.py excludes the bundle,
+    but a rerun against a newer bundle may overlap). Rows this function added
+    on an earlier run that no longer pass the filter are deleted, so tightening
+    is_filovirus_paper actually removes papers rather than leaving them behind.
+    """
+    if not raw_table_exists(CITED_PUBS_TABLE):
+        print(f"cited papers: raw.{CITED_PUBS_TABLE} absent, skipped "
+              "(run fetch_cited_publications.py)")
+        return
+
+    raw = read_raw(CITED_PUBS_TABLE).fillna("")
+    kept = raw[[is_filovirus_paper(r.title, r.mesh_terms, r.abstract)
+                for r in raw.itertuples(index=False)]]
+
+    pmids = []
+    for r in kept.itertuples(index=False):
+        pmid = blank_to_none(r.pmid)
+        # A bundle paper is already a core.publication row owned by
+        # build_papers; claiming it here would duplicate its lineage.
+        if pmid is None or pmid in bundle_pmids:
+            continue
+        publication_id = conn.execute(
+            text(
+                """
+                INSERT INTO core.publication
+                    (pubmed_id, title, abstract, mesh_terms, authors, journal, year, doi, url, source_id)
+                VALUES (:pubmed_id, :title, :abstract, :mesh_terms, :authors, :journal, :year, :doi, :url, :source_id)
+                ON CONFLICT (pubmed_id) DO UPDATE
+                    SET title      = COALESCE(core.publication.title, EXCLUDED.title),
+                        abstract   = COALESCE(core.publication.abstract, EXCLUDED.abstract),
+                        mesh_terms = COALESCE(core.publication.mesh_terms, EXCLUDED.mesh_terms),
+                        authors    = COALESCE(core.publication.authors, EXCLUDED.authors),
+                        journal    = COALESCE(core.publication.journal, EXCLUDED.journal),
+                        year       = COALESCE(core.publication.year, EXCLUDED.year),
+                        doi        = COALESCE(core.publication.doi, EXCLUDED.doi),
+                        url        = COALESCE(core.publication.url, EXCLUDED.url),
+                        source_id  = COALESCE(core.publication.source_id, EXCLUDED.source_id)
+                RETURNING publication_id
+                """
+            ),
+            {
+                "pubmed_id": pmid,
+                "title": blank_to_none(r.title),
+                "abstract": blank_to_none(r.abstract),
+                "mesh_terms": blank_to_none(r.mesh_terms),
+                "authors": blank_to_none(r.authors),
+                "journal": blank_to_none(r.journal),
+                "year": blank_to_none(r.year),
+                "doi": blank_to_none(r.doi),
+                "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                "source_id": sid,
+            },
+        ).scalar()
+        pmids.append(pmid)
+        add_xref(xref_rows, "publication", publication_id, sid, "pubmed_id", pmid)
+        add_provenance(provenance_rows, "publication", publication_id, sid, CITED_PUBS_TABLE, pmid)
+
+    # evidence_link was truncated at the start of the run, so nothing points at
+    # these yet; study_publication is ImmPort's and is left alone.
+    removed = conn.execute(
+        text(
+            """
+            DELETE FROM core.publication p
+            WHERE p.source_id = :sid
+              AND NOT (p.pubmed_id = ANY(:pmids))
+              AND NOT EXISTS (SELECT 1 FROM core.study_publication sp
+                              WHERE sp.publication_id = p.publication_id)
+            """
+        ),
+        {"sid": sid, "pmids": pmids},
+    ).rowcount
+
+    print(f"cited papers: {len(pmids)} of {len(raw)} grant-cited papers kept as filovirus papers"
+          + (f", {removed} no longer passing removed" if removed else ""))
+
+
 def build_grant_publication_links(conn, links, award_ids, sid):
     """
     grant -> paper edges from RePORTER's own publication list. This is the only
     direct document-to-document edge in the evidence layer; everything else
-    connects through a shared entity (see core.v_evidence_cooccurrence).
+    connects to an entity, not to another document.
     """
     if not raw_table_exists(GRANT_PUBS_TABLE):
         print("grant -> paper links: raw.nih_reporter_grant_publications absent, skipped "
@@ -422,8 +525,8 @@ def build_grant_publication_links(conn, links, award_ids, sid):
             continue
         publication_id = pub_ids.get(str(r.pmid))
         if publication_id is None:
-            # The paper is cited by the grant but isn't one of the 300 papers
-            # reached from the KG, so there is no core.publication row to point at.
+            # Cited, but neither reached from the KG nor kept by
+            # build_cited_papers (off-topic, or the fetch hasn't been run).
             unmatched_pub += 1
             continue
         links.add("grant_award", award_id, "publication", publication_id, "cites",
@@ -556,7 +659,7 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
 # Papers
 # ---------------------------------------------------------------------------
 
-def build_papers(conn, links, xref_rows, provenance_rows, sid):
+def build_papers(conn, links, xref_rows, provenance_rows, sid, cited_sid=None):
     if not raw_table_exists(PAPERS_TABLE):
         print("core.publication: raw.papers_unique absent, skipped")
         return {}
@@ -600,7 +703,13 @@ def build_papers(conn, links, xref_rows, provenance_rows, sid):
                         year      = COALESCE(core.publication.year, EXCLUDED.year),
                         doi       = COALESCE(core.publication.doi, EXCLUDED.doi),
                         url       = COALESCE(core.publication.url, EXCLUDED.url),
-                        source_id = COALESCE(core.publication.source_id, EXCLUDED.source_id)
+                        -- A paper that first entered as a grant citation and is
+                        -- now in the bundle belongs to the bundle; otherwise
+                        -- build_cited_papers would treat it as its own and could
+                        -- delete it. Any other existing source (ImmPort) is kept.
+                        source_id = CASE WHEN core.publication.source_id = :cited_sid
+                                         THEN EXCLUDED.source_id
+                                         ELSE COALESCE(core.publication.source_id, EXCLUDED.source_id) END
                 RETURNING publication_id
                 """
             ),
@@ -614,6 +723,7 @@ def build_papers(conn, links, xref_rows, provenance_rows, sid):
                 "doi": blank_to_none(r.doi) or (blank_to_none(meta.doi) if meta is not None else None),
                 "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
                 "source_id": sid,
+                "cited_sid": cited_sid,
             },
         ).scalar()
         publication_ids[pmid] = publication_id
@@ -767,9 +877,14 @@ WHERE (entity_type = 'taxon'     AND NOT EXISTS (SELECT 1 FROM core.taxon     t 
    OR (entity_type = 'condition' AND NOT EXISTS (SELECT 1 FROM core.condition c WHERE c.condition_id::text = el.entity_id))
    OR (entity_type = 'structure' AND NOT EXISTS (SELECT 1 FROM core.structure s WHERE s.structure_id::text = el.entity_id))
    OR (entity_type = 'isolate'   AND NOT EXISTS (SELECT 1 FROM core.isolate   i WHERE i.isolate_id::text   = el.entity_id))
+   OR (entity_type = 'sequence'  AND NOT EXISTS (SELECT 1 FROM core.sequence  q WHERE q.sequence_id::text  = el.entity_id))
    OR (entity_type = 'feature'   AND NOT EXISTS (SELECT 1 FROM core.feature   f WHERE f.feature_id::text   = el.entity_id))
    OR (entity_type = 'study'     AND NOT EXISTS (SELECT 1 FROM core.study     y WHERE y.study_accession    = el.entity_id))
    OR (entity_type = 'publication' AND NOT EXISTS (SELECT 1 FROM core.publication u WHERE u.publication_id::text = el.entity_id))
+   OR (entity_type = 'grant_award' AND NOT EXISTS (SELECT 1 FROM core.grant_award g WHERE g.grant_award_id::text = el.entity_id))
+   OR (entity_type = 'patent'      AND NOT EXISTS (SELECT 1 FROM core.patent      p WHERE p.patent_id::text      = el.entity_id))
+   OR (entity_type = 'symptom'     AND NOT EXISTS (SELECT 1 FROM core.symptom     s WHERE s.symptom_id::text     = el.entity_id))
+   OR (entity_type = 'assay_type'  AND NOT EXISTS (SELECT 1 FROM core.assay_type  a WHERE a.assay_type_id::text  = el.entity_id))
 GROUP BY entity_type
 """
 
@@ -796,8 +911,11 @@ def main():
                                   source_ids["nih_reporter"])
         build_patents(conn, matcher, links, xref_rows, provenance_rows, source_ids["uspto"])
         publication_ids = build_papers(conn, links, xref_rows, provenance_rows,
-                                        source_ids["pubmed"])
+                                        source_ids["pubmed"], source_ids["nih_reporter"])
         build_paper_links(conn, links, publication_ids, source_ids, source_ids["pubmed"])
+        # Before the citation links: those resolve PMIDs against core.publication.
+        build_cited_papers(conn, xref_rows, provenance_rows, source_ids["nih_reporter"],
+                           bundle_pmids=set(publication_ids))
         build_grant_publication_links(conn, links, award_ids, source_ids["nih_reporter"])
 
         link_rows, support_rows = links.write(conn, provenance_rows)
@@ -822,9 +940,11 @@ def main():
 
     write_xref(xref_rows, XREF_ENTITY_TYPES_OWNED)
     # core.publication is shared with etl_immport, so this script replaces only
-    # the lineage rows it is responsible for -- the ones attributed to pubmed.
+    # the lineage rows it is responsible for -- pubmed (the papers bundle) and
+    # nih_reporter (papers that entered through a grant's citations).
     write_provenance(provenance_rows, PROVENANCE_TABLES_OWNED,
-                      shared_tables={"publication": [source_ids["pubmed"]]})
+                      shared_tables={"publication": [source_ids["pubmed"],
+                                                     source_ids["nih_reporter"]]})
 
     if orphans:
         for entity_type, count in orphans:

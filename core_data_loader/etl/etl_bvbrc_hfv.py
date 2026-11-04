@@ -44,6 +44,12 @@ def hfv_clean(v):
     return None if v == "_" else v
 
 
+def ctl_assay_method(v):
+    # LANL's CTL file also writes "NA" for "no assay recorded", on top of "_".
+    v = hfv_clean(v)
+    return None if v is None or v.upper() == "NA" else v
+
+
 def parse_neutralizing(v):
     # Tri-state. LANL qualifies some calls by strain ("yes (Mayinga)"), which
     # is still a yes -- the qualifier belongs in a comment, not the boolean.
@@ -764,6 +770,7 @@ def build_bvbrc_epitopes(ctx: BuildContext, epitope: pd.DataFrame):
                 "mhc_allele": None,
                 "host_species": r.host_name,
                 "assay_outcome": raw_val,
+                "assay_method": None,
                 "total_assays": total,
                 "pmid": None,
                 "source_id": ctx.bvbrc_sid,
@@ -841,7 +848,14 @@ def build_ctl_assays(ctx: BuildContext, ctl: pd.DataFrame):
             "assay_type": "T cell",
             "mhc_allele": hfv_clean(r.hla) or hfv_clean(r.mhc),
             "host_species": hfv_clean(r.host_species_mouse_mus_musculus),
-            "assay_outcome": hfv_clean(r.assay) or hfv_clean(r.predicted),
+            # The CTL file's `assay` column is the method ("EliSpot, IFNg"), not
+            # a result -- this used to go into assay_outcome. The file carries
+            # no outcome: every row is a reported (positive) CTL epitope.
+            # `predicted` was the old fallback, but it holds a predicted minimal
+            # peptide with its restriction ("GPCPGGLAF H-2Ld"), not an outcome
+            # either; every row has an assay value, so it was never used.
+            "assay_outcome": None,
+            "assay_method": ctl_assay_method(r.assay),
             "total_assays": None,
             "pmid": hfv_clean(r.pmid),
             "source_id": ctx.hfv_sid,

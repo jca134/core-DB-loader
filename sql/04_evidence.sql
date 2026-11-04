@@ -133,6 +133,12 @@ CREATE INDEX IF NOT EXISTS idx_patent_cpc_code ON core.patent_cpc(cpc_code);
 
 ALTER TABLE core.publication ADD COLUMN IF NOT EXISTS url       TEXT;
 ALTER TABLE core.publication ADD COLUMN IF NOT EXISTS source_id INTEGER REFERENCES core.source(source_id);
+-- Filled for papers reached through a grant's citation list
+-- (fetch_cited_publications.py): the relevance filter reads them, and they are
+-- the text any document-similarity comparison needs. NULL for the papers
+-- workstream's own 300 until their abstracts are fetched too.
+ALTER TABLE core.publication ADD COLUMN IF NOT EXISTS abstract   TEXT;
+ALTER TABLE core.publication ADD COLUMN IF NOT EXISTS mesh_terms TEXT;   -- '; '-separated MeSH descriptor names
 
 -- ===========================================================================
 -- 4. evidence_link: one row per (evidence document, core entity) pair
@@ -153,11 +159,18 @@ CREATE TABLE IF NOT EXISTS core.evidence_link (
     -- paper-to-epitope links sat in the table.
     evidence_type    TEXT NOT NULL CHECK (evidence_type IN ('grant_award', 'patent', 'publication')),
     evidence_id      BIGINT NOT NULL,
-    -- 'publication' makes a paper addressable as a *target* as well as an
-    -- evidence document, which is what a grant -> paper citation needs.
+    -- All three document types are valid targets too, so documents can link
+    -- to each other directly: grant -> paper (cites) today, and grant <-> patent
+    -- or paper <-> patent wherever a source or a similarity measure supplies
+    -- one. Without this the only path between two documents was two hops
+    -- through a shared entity -- for grant/patent pairs, almost always one of a
+    -- handful of hub taxa, which connects 87% of all pairs and means nothing.
+    -- Kept in step with the ALTER below, which applies it to existing tables.
     entity_type      TEXT NOT NULL CHECK (entity_type IN (
         'taxon', 'gene', 'protein', 'epitope', 'antibody', 'condition',
-        'structure', 'isolate', 'sequence', 'feature', 'study', 'publication'
+        'structure', 'isolate', 'sequence', 'feature', 'study',
+        'publication', 'grant_award', 'patent',
+        'symptom', 'assay_type'          -- sql/05_clinical_vocab.sql
     )),
     entity_id        TEXT NOT NULL,    -- TEXT because core PKs are a mix of BIGINT and accession strings (core.study)
     -- Vocabulary from the team's shared evidence format (Work.pdf B):
@@ -165,14 +178,33 @@ CREATE TABLE IF NOT EXISTS core.evidence_link (
     --   claims    patent      -> antibody / protein / gene
     --   describes publication -> structure / epitope / antibody (exact-ID links)
     --   cites     grant_award -> publication  (RePORTER's own publication list)
+    --             (also the relation for any future document -> document
+    --              citation: patent -> paper, paper -> paper)
     --   related   anything reached by keyword rather than an exact identifier
     relation         TEXT NOT NULL CHECK (relation IN ('funds', 'claims', 'describes', 'cites', 'related')),
     -- How certain the link is: 1.0 for an exact identifier match, lower for
-    -- keyword-derived ones. Carried into core.kg_edge.weight.
+    -- keyword-derived ones.
     confidence       NUMERIC(3, 2) NOT NULL DEFAULT 1.00 CHECK (confidence > 0 AND confidence <= 1),
     source_id        INTEGER NOT NULL REFERENCES core.source(source_id),
     UNIQUE (evidence_type, evidence_id, entity_type, entity_id, relation)
 );
+
+-- CREATE TABLE IF NOT EXISTS leaves an existing table's CHECKs alone, so the
+-- widened entity_type list is applied explicitly, as for core.xref below.
+ALTER TABLE core.evidence_link DROP CONSTRAINT IF EXISTS evidence_link_entity_type_check;
+ALTER TABLE core.evidence_link ADD CONSTRAINT evidence_link_entity_type_check CHECK (entity_type IN (
+    'taxon', 'gene', 'protein', 'epitope', 'antibody', 'condition',
+    'structure', 'isolate', 'sequence', 'feature', 'study',
+    'publication', 'grant_award', 'patent',
+    'symptom', 'assay_type'
+));
+
+-- Now that a document can be a target, it could be its own target. A paper
+-- that "cites" itself is a loop: noise to any walk over these edges, and in a
+-- row-normalised transition matrix it inflates the paper's stay probability.
+ALTER TABLE core.evidence_link DROP CONSTRAINT IF EXISTS evidence_link_no_self_link;
+ALTER TABLE core.evidence_link ADD CONSTRAINT evidence_link_no_self_link
+    CHECK (NOT (evidence_type = entity_type AND evidence_id::text = entity_id));
 
 CREATE INDEX IF NOT EXISTS idx_evidence_link_entity ON core.evidence_link(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_link_evidence ON core.evidence_link(evidence_type, evidence_id);
@@ -247,24 +279,14 @@ LEFT JOIN core.evidence_link_support els USING (evidence_link_id)
 GROUP BY el.evidence_link_id, el.evidence_type, el.evidence_id,
          el.relation, el.entity_type, el.entity_id, el.confidence;
 
--- Two evidence documents that reach the same entity are two hops apart through
--- it. This is how a grant connects to a patent, or a paper to a grant, without
--- any direct document-to-document edge in the data: the path is
--- grant -> taxon <- patent. Materialize if it gets slow; it is a view so it
--- always reflects the current links.
-CREATE OR REPLACE VIEW core.v_evidence_cooccurrence AS
-SELECT a.evidence_type      AS a_type,
-       a.evidence_id        AS a_id,
-       b.evidence_type      AS b_type,
-       b.evidence_id        AS b_id,
-       a.entity_type,
-       a.entity_id,
-       least(a.confidence, b.confidence) AS confidence
-FROM core.evidence_link a
-JOIN core.evidence_link b
-  ON a.entity_type = b.entity_type
- AND a.entity_id = b.entity_id
- AND (a.evidence_type, a.evidence_id) < (b.evidence_type, b.evidence_id);
+-- core.v_evidence_cooccurrence (documents paired through a shared entity) was
+-- removed 2026-11-03. Measured on the real data it connected 87% of all
+-- grant/patent pairs, nearly all through a handful of hub taxa, and could never
+-- connect a paper to a patent at all (they link to disjoint entity types).
+-- Document-to-document edges now come from citations and a text-proximity
+-- graph, stored directly in core.evidence_link. Dropped here so existing
+-- databases lose it too.
+DROP VIEW IF EXISTS core.v_evidence_cooccurrence;
 
 -- ===========================================================================
 -- 7. Orphan check: evidence_link rows whose entity_id doesn't exist.
@@ -282,4 +304,6 @@ JOIN core.evidence_link b
 --    OR (el.entity_type = 'sequence'  AND NOT EXISTS (SELECT 1 FROM core.sequence  q WHERE q.sequence_id::text  = el.entity_id))
 --    OR (el.entity_type = 'feature'   AND NOT EXISTS (SELECT 1 FROM core.feature   f WHERE f.feature_id::text   = el.entity_id))
 --    OR (el.entity_type = 'study'     AND NOT EXISTS (SELECT 1 FROM core.study     y WHERE y.study_accession    = el.entity_id))
---    OR (el.entity_type = 'publication' AND NOT EXISTS (SELECT 1 FROM core.publication u WHERE u.publication_id::text = el.entity_id));
+--    OR (el.entity_type = 'publication' AND NOT EXISTS (SELECT 1 FROM core.publication u WHERE u.publication_id::text = el.entity_id))
+--    OR (el.entity_type = 'grant_award' AND NOT EXISTS (SELECT 1 FROM core.grant_award g WHERE g.grant_award_id::text = el.entity_id))
+--    OR (el.entity_type = 'patent'      AND NOT EXISTS (SELECT 1 FROM core.patent      p WHERE p.patent_id::text      = el.entity_id));

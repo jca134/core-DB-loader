@@ -13,6 +13,12 @@ SOURCE_CODE = "nih_reporter"
 PUBLICATIONS_FILEPATH = "data/grants/grant_publications.csv"
 PUBLICATIONS_TABLE = "nih_reporter_grant_publications"
 
+# Optional, written by fetch_cited_publications.py: PubMed records (with
+# abstracts) for the cited papers that aren't among the papers workstream's
+# 300. etl_evidence keeps only the filovirus ones.
+CITED_FILEPATH = "data/grants/cited_publications.csv"
+CITED_TABLE = "nih_reporter_cited_publications"
+
 
 def main():
     ensure_raw_schema()
@@ -35,6 +41,15 @@ def main():
         else:
             load_to_raw(pubs, PUBLICATIONS_TABLE, batch_id=batch_id, source_id=source_id,
                         file_path=PUBLICATIONS_FILEPATH)
+
+        try:
+            cited = pd.read_csv(CITED_FILEPATH, dtype=str, keep_default_na=False)
+        except FileNotFoundError:
+            print(f"  (no {CITED_FILEPATH}; run fetch_cited_publications.py "
+                  "to add the filovirus papers grants cite)")
+        else:
+            load_to_raw(cited, CITED_TABLE, batch_id=batch_id, source_id=source_id,
+                        file_path=CITED_FILEPATH)
     except Exception:
         complete_batch(batch_id, status="failed")
         raise
