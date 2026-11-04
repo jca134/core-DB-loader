@@ -259,25 +259,13 @@ ALTER TABLE core.xref ADD CONSTRAINT xref_entity_type_check CHECK (entity_type I
 ));
 
 -- ===========================================================================
--- 6. One flat, weighted edge list over the evidence layer
+-- 6. Removed views
 -- ===========================================================================
--- A consumer that wants (source, relation, target, weight) tuples does not care
--- which of the three document types an edge came from. This view hands over
--- exactly that shape, with a stable text node id per side, so nothing
--- downstream has to know the evidence schema.
-CREATE OR REPLACE VIEW core.v_evidence_edge AS
-SELECT el.evidence_link_id,
-       el.evidence_type                                     AS source_type,
-       el.evidence_type || ':' || el.evidence_id::text      AS source_node,
-       el.relation,
-       el.entity_type                                       AS target_type,
-       el.entity_type || ':' || el.entity_id                AS target_node,
-       el.confidence,
-       count(els.evidence_link_support_id)                  AS support_count
-FROM core.evidence_link el
-LEFT JOIN core.evidence_link_support els USING (evidence_link_id)
-GROUP BY el.evidence_link_id, el.evidence_type, el.evidence_id,
-         el.relation, el.entity_type, el.entity_id, el.confidence;
+-- core.v_evidence_edge (a flat source/relation/target/weight list for a graph
+-- consumer) is out of scope: this repo builds the database only, and reshaping
+-- it for a consumer was removed with the rest of the graph projection.
+-- Dropped here so existing databases lose it too.
+DROP VIEW IF EXISTS core.v_evidence_edge;
 
 -- core.v_evidence_cooccurrence (documents paired through a shared entity) was
 -- removed 2026-11-03. Measured on the real data it connected 87% of all
