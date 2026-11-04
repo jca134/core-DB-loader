@@ -11,8 +11,9 @@ Run after etl_bvbrc_hfv and etl_immport: they truncate core.isolate,
 core.epitope_assay and core.experiment, and the CASCADE empties these link
 tables. run_all.py encodes the order; sql/checks.sql flags an emptied table.
 
-Also writes exports/kg_clinical_terms.csv in kg_keywords.csv's layout, so
-grant/paper keyword matching can use the same terms. entity_ids there are the
+Also writes exports/kg_clinical_terms.csv in kg_keywords.csv's layout --
+symptoms, assay types, and disease terms (CONDITION_TERMS) -- so grant/paper
+keyword matching can use the same terms. entity_ids there are the
 HPO / OBI ids (stable), not this DB's surrogate ids.
 """
 
@@ -23,7 +24,7 @@ from sqlalchemy import text
 
 from core_data_loader.common.accessions import base_accession
 from core_data_loader.common.clinical_vocab import (
-    ASSAY_TYPES, IEDB_CATEGORY, SYMPTOMS,
+    ASSAY_TYPES, CONDITION_TERMS, IEDB_CATEGORY, SYMPTOMS,
     ensure_vocab, match_assay_name, parse_ctl_methods, parse_symptoms,
 )
 from core_data_loader.common.db_utils import engine
@@ -147,6 +148,19 @@ def write_export(path=EXPORT_PATH) -> int:
                     "notes": (f"no {id_label} term at this granularity" if not ext_id else "")
                              + (f"; kind of {parent}" if parent else ""),
                 })
+    for name, entity_ids, note, terms in CONDITION_TERMS:
+        for term, scope, requires_context in terms:
+            rows.append({
+                "entity_type": "condition",
+                "canonical_name": name,
+                "search_term": term,
+                "term_type": "db_name" if term == name.lower() else "synonym",
+                "scope": scope,
+                "requires_context": "TRUE" if requires_context else "FALSE",
+                "entity_ids": entity_ids,
+                "source": "Disease Ontology / MONDO (common/clinical_vocab.py)",
+                "notes": note,
+            })
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
         writer.writeheader()
