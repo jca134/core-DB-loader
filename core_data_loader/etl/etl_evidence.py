@@ -267,7 +267,7 @@ def contact_pi(row) -> str | None:
 def build_grants(conn, matcher, links, xref_rows, provenance_rows, sid):
     if not raw_table_exists(GRANTS_TABLE):
         print("core.grant_award: raw.nih_reporter_grants absent, skipped")
-        return {}
+        return {}, {}
 
     raw = read_raw(GRANTS_TABLE).fillna("")
     raw["award_key_"] = [
@@ -281,6 +281,7 @@ def build_grants(conn, matcher, links, xref_rows, provenance_rows, sid):
 
     award_ids = {}
     funding_ids = {}
+    award_by_appl = {}
     dropped_no_context = 0
     for key, group in raw.groupby("award_key_", sort=False):
         award_hits = []
@@ -358,6 +359,7 @@ def build_grants(conn, matcher, links, xref_rows, provenance_rows, sid):
                 },
             ).scalar()
             funding_ids[r.appl_id] = funding_id
+            award_by_appl[r.appl_id] = award_id
             add_xref(xref_rows, "grant_funding", funding_id, sid, "nih_appl_id", r.appl_id)
             add_xref(xref_rows, "grant_funding", funding_id, sid, "nih_project_num", r.project_num)
             add_provenance(provenance_rows, "grant_funding", funding_id, sid, GRANTS_TABLE, r.appl_id)
@@ -403,7 +405,7 @@ def build_grants(conn, matcher, links, xref_rows, provenance_rows, sid):
     if dropped_no_context:
         print(f"  {dropped_no_context} ambiguous-term hits dropped "
               "(grant names no organism; see organism_context_established)")
-    return award_ids
+    return award_ids, award_by_appl
 
 
 def is_filovirus_paper(title: str, mesh_terms: str, abstract: str) -> bool:
@@ -663,7 +665,7 @@ DISEASE_NAME_RE = re.compile(
 CLINICAL_ENTITY_TYPES = ("condition", "symptom", "assay_type")
 
 
-def build_grant_clinical_links(conn, links, sid):
+def build_grant_clinical_links(conn, links, award_by_appl, sid):
     """
     grant -> condition / symptom / assay_type keyword links from a teammate's
     grant_entity_edges.csv. etl_evidence's own matcher covers taxa and genes
@@ -679,20 +681,17 @@ def build_grant_clinical_links(conn, links, sid):
     by the file's ids; conditions not in core.condition are dropped.
 
     Awards resolve through the RePORTER appl_id in each row's URL, because the
-    file keys contracts differently from award_key().
+    file keys contracts differently from award_key(). The appl_id -> award map
+    comes from build_grants in this same run, NOT from core.xref: xref rows are
+    only rewritten at the end of the run, so reading them here would see the
+    previous run's ids -- or, on a fresh database, none at all (which silently
+    dropped all 349 hits).
     """
     if not raw_table_exists(GRANT_ENTITY_EDGES_TABLE):
         return
     raw = read_raw(GRANT_ENTITY_EDGES_TABLE).fillna("")
     raw = raw[raw["matched_entity_type"].isin(CLINICAL_ENTITY_TYPES)]
 
-    award_by_appl = dict(conn.execute(text(
-        """
-        SELECT x.xref_value, f.grant_award_id FROM core.xref x
-        JOIN core.grant_funding f ON f.grant_funding_id = x.entity_id::bigint
-        WHERE x.entity_type = 'grant_funding' AND x.xref_type = 'nih_appl_id'
-        """
-    )).fetchall())
     funding_text = {}
     for award_id, funding_id, title, abstract in conn.execute(text(
         "SELECT grant_award_id, grant_funding_id, project_title, abstract_text "
@@ -1221,9 +1220,9 @@ def main():
     print(f"kg_keywords: {len(matcher.terms)} terms resolved to live core entities")
 
     with engine.begin() as conn:
-        award_ids = build_grants(conn, matcher, links, xref_rows, provenance_rows,
-                                  source_ids["nih_reporter"])
-        build_grant_clinical_links(conn, links, source_ids["nih_reporter"])
+        award_ids, award_by_appl = build_grants(conn, matcher, links, xref_rows, provenance_rows,
+                                                 source_ids["nih_reporter"])
+        build_grant_clinical_links(conn, links, award_by_appl, source_ids["nih_reporter"])
         patent_ids = build_patents(conn, matcher, links, xref_rows, provenance_rows, source_ids["uspto"])
         publication_ids = build_papers(conn, links, xref_rows, provenance_rows,
                                         source_ids["pubmed"], source_ids["nih_reporter"],
