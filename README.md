@@ -160,8 +160,9 @@ grants workstreams. Each is picked up if it exists and skipped if it doesn't:
 
 Patents' references cited are free text, not PMIDs. This fetch resolves them
 against PubMed and verifies each match (title similarity, or author + year +
-volume + page). `etl_evidence` then adds the filovirus ones to
-`core.publication` with the same rule used for grant-cited papers:
+volume + page). `etl_evidence` then adds every resolved paper to
+`core.publication` -- unlike grant-cited papers there is no filovirus filter,
+because a patent's short reference list is the prior art it builds on:
 
 ```bash
 uv run python -m core_data_loader.loaders.fetch_patent_cited_publications

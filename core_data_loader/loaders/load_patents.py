@@ -31,7 +31,9 @@ FILES = [
 #                                  publication date, CPC codes or page count.
 #   patent_entity_links.csv        keyword hits in each patent's title AND
 #                                  abstract; the abstracts themselves are not
-#                                  supplied, so abstract hits are taken as given.
+#                                  supplied, so each abstract keyword is re-run
+#                                  through the shared matcher (its entity ids
+#                                  are stale and are never used).
 #   patent_team_paper_edges.csv    patent -> paper citations already resolved
 #                                  to PMIDs, for papers already in the KG.
 #   patent_cited_publications.csv  every reference a patent cites, resolved to

@@ -34,8 +34,8 @@ that stays unresolved, because it becomes an asserted 'cites' edge:
             only on exactly one hit whose author list contains the surname.
 
 Every resolved row records which strategy and score produced it, so any edge
-is auditable. Relevance (is the cited paper a filovirus paper?) is decided in
-etl_evidence, not here, so the threshold can change without another network run.
+is auditable. Which resolved papers to keep is decided in etl_evidence, not
+here (currently: all of them), so that can change without another network run.
 
 Network, free, no API key. Run once, keep the CSV.
 """

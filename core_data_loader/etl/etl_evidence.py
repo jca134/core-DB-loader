@@ -820,15 +820,18 @@ def _patent_groups():
     present, the expanded file's additional patents. The expanded file repeats
     the 72 exported patents with identical fields; for those the export stays
     authoritative because only it carries query_organism. Expanded rows are
-    renamed onto the export's column names so one insert path serves both.
+    renamed onto the export's column names so one insert path serves both;
+    raw_table_ / raw_pk_ keep each row's real origin for its lineage row.
     """
     raw = read_raw(PATENTS_TABLE).fillna("")
+    raw["raw_table_"], raw["raw_pk_"] = PATENTS_TABLE, raw["document_id"]
     groups = list(raw.groupby("document_id", sort=False))
     if not raw_table_exists(PATENTS_EXPANDED_TABLE):
         return groups, 0
 
     seen = {doc for doc, _ in groups}
     expanded = read_raw(PATENTS_EXPANDED_TABLE).fillna("")
+    expanded["raw_table_"], expanded["raw_pk_"] = PATENTS_EXPANDED_TABLE, expanded["patent_id"]
     expanded = expanded.rename(columns={"patent_id": "document_id", "date": "date_published"})
     expanded["document_id"] = expanded["document_id"].map(normalize_document_id)
     expanded["family_id"] = expanded["family_id"].map(lambda v: _family_id(v) or "")
@@ -909,7 +912,7 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
         patent_ids[document_id] = patent_id
         add_xref(xref_rows, "patent", patent_id, sid, "uspto_document_id", document_id)
         add_xref(xref_rows, "patent", patent_id, sid, "uspto_application_num", first["application_number"])
-        add_provenance(provenance_rows, "patent", patent_id, sid, PATENTS_TABLE, document_id)
+        add_provenance(provenance_rows, "patent", patent_id, sid, first["raw_table_"], first["raw_pk_"])
 
         for column, kind_label in (("cpci", "inventive"), ("cpca", "additional")):
             for code in str(first[column]).split(";"):
