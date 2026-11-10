@@ -87,6 +87,9 @@ SUPPLEMENTAL_TERMS = [
     ("filovirus", "taxon", 11266, "common_name"),     # Filoviridae (family)
     ("filoviruses", "taxon", 11266, "common_name"),
     ("filoviral", "taxon", 11266, "common_name"),
+    # One token, so "filovirus" never matches inside it; three patent titles
+    # ("use as panfilovirus vaccine") are otherwise unlinked.
+    ("panfilovirus", "taxon", 11266, "common_name"),
     ("Filoviridae", "taxon", 11266, "db_name"),
 ]
 

@@ -36,15 +36,49 @@ TAXON_CONDITIONS = [
 ]
 
 
+# Filovirus diseases that must exist in core.condition even when no loaded
+# ImmPort study names them. etl_immport fills core.condition from ImmPort's
+# vocabulary and truncates it on every run, so without this Marburg -- which
+# no loaded study covers -- had no row: the Marburg mappings above were
+# silently skipped and grant -> Marburg disease links had nothing to point at.
+# Inserted only if ImmPort didn't supply the same ontology_id.
+#
+# Deliberately filovirus diseases only. "Viral hemorrhagic fever"
+# (MONDO:0018087) is left out: it spans arena-, bunya- and flaviviruses too,
+# and as a node it would mostly connect grants about Lassa or dengue.
+CURATED_CONDITIONS = [
+    # (ontology_id, name)
+    ("DOID:4327", "Marburg hemorrhagic fever"),
+]
+
+
+def ensure_curated_conditions(conn) -> int:
+    inserted = 0
+    for ontology_id, name in CURATED_CONDITIONS:
+        inserted += conn.execute(
+            text(
+                """
+                INSERT INTO core.condition (condition_reported, condition_preferred, ontology_id)
+                SELECT :name, :name, :ontology_id
+                WHERE NOT EXISTS (SELECT 1 FROM core.condition WHERE ontology_id = :ontology_id)
+                """
+            ),
+            {"name": name, "ontology_id": ontology_id},
+        ).rowcount
+    return inserted
+
+
 def ensure_taxon_conditions() -> int:
     """
     (Re)populate core.taxon_condition from TAXON_CONDITIONS. A mapping is
     inserted only where both sides already exist -- taxon_id in core.taxon,
     ontology_id matching a core.condition row -- so a disease with no
-    matching ImmPort study loaded yet (e.g. Marburg) is silently skipped
-    rather than failing. Safe to rerun any time either table changes.
+    matching core.condition row is silently skipped rather than failing
+    (CURATED_CONDITIONS seeds the filovirus ones first, so in practice that
+    is only a disease removed from both). Safe to rerun any time either table changes.
     """
     with engine.begin() as conn:
+        ensure_curated_conditions(conn)
         conn.execute(text("DELETE FROM core.taxon_condition"))
         inserted = 0
         for taxon_id, _taxon_name, ontology_id, _disease_name in TAXON_CONDITIONS:

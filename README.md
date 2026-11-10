@@ -146,6 +146,28 @@ edges instead of being dropped. Run it after `fetch_grant_publications`:
 uv run python -m core_data_loader.loaders.fetch_cited_publications
 ```
 
+Patents and grants also take optional companion files from the patents and
+grants workstreams. Each is picked up if it exists and skipped if it doesn't:
+
+| File | What it adds |
+| --- | --- |
+| `data/patents/patent_evidence_expanded.csv` | 100 more patents from a broader USPTO abstract search (no publication date, CPC codes or page count) |
+| `data/patents/patent_entity_links.csv` | keyword hits in patent **abstracts**, re-resolved through the shared matcher |
+| `data/patents/patent_team_paper_edges.csv` | patent -> paper citations already resolved to PMIDs |
+| `data/patents/patent_external_literature_edges.csv` | patents' free-text references cited (input to the fetch below) |
+| `data/grants/grant_entity_edges.csv` | grant -> condition / symptom / assay-type hits, each re-checked against the stored grant text |
+| `data/grants/grant_paper_divergence.csv` | only its `pubmed_ack` rows are used: grant -> paper citations from the paper's PubMed grant list |
+
+Patents' references cited are free text, not PMIDs. This fetch resolves them
+against PubMed and verifies each match (title similarity, or author + year +
+volume + page). `etl_evidence` then adds every resolved paper to
+`core.publication` -- unlike grant-cited papers there is no filovirus filter,
+because a patent's short reference list is the prior art it builds on:
+
+```bash
+uv run python -m core_data_loader.loaders.fetch_patent_cited_publications
+```
+
 Papers need one too. PubMed supplies the titles and years the papers bundle
 doesn't carry; without it every paper node is labelled `PMID 28854372` and has
 no date, which keeps papers out of any temporal analysis:
