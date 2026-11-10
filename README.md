@@ -182,6 +182,46 @@ epitope, or structure, join on the `core.taxon_condition_inherited` view,
 which carries each mapping down to every descendant taxon (strains, legacy
 species names, and so on).
 
+## Graph database (Neo4j)
+
+The same data can be queried as a graph in Neo4j, using Cypher -- the query
+language SerenQA's retrieval task generates. Postgres stays the source of
+truth: the export wipes Neo4j and rebuilds it from `core.*`, so rerun it after
+every `run_all`.
+
+One-time setup (macOS):
+
+```bash
+brew install neo4j
+neo4j-admin dbms set-initial-password filovirus   # before the first start
+brew services start neo4j
+```
+
+Then export:
+
+```bash
+uv run python -m core_data_loader.export.export_neo4j
+```
+
+It fails if any node or relationship count differs from the Postgres rows it
+came from. Override the connection with `NEO4J_URI`, `NEO4J_USER` and
+`NEO4J_PASSWORD`.
+
+Query it in Neo4j Browser at <http://localhost:7474> (user `neo4j`). Nodes are
+the core tables in CamelCase (`Taxon`, `Grant`, `Patent`, `Publication`, ...)
+keyed on the same primary keys; evidence links are `RELATED`, `CITES`,
+`CLAIMS` and `DESCRIBES` relationships carrying `confidence` and
+`matched_terms`. External ids are node properties (`xref_genbank_accession`,
+`xref_ncbi_protein_id`, ...).
+
+```cypher
+// papers cited by both a patent and a grant
+MATCH (p:Patent)-[:CITES]->(paper:Publication)<-[:CITES]-(g:Grant)
+RETURN p, paper, g LIMIT 25
+```
+
+Raw sequence strings and lineage tables stay in Postgres only.
+
 ## Project layout
 
 | Path | Purpose |
@@ -195,6 +235,7 @@ species names, and so on).
 | `core_data_loader/common/etl_common.py` | Shared helpers for `etl/` (raw → core transforms) |
 | `core_data_loader/loaders/` | One script per source; loads raw files into `raw.<table>` |
 | `core_data_loader/etl/` | Transforms `raw.*` tables into `core.*` |
+| `core_data_loader/export/export_neo4j.py` | Rebuilds the Neo4j graph from `core.*` |
 | `core_data_loader/profiling/profile_bvbrc.py` | Profiles `raw.bvbrc_*` columns, writes `profile/bvbrc_profile.csv` |
 | `sql/` | Schema DDL — run once against a fresh database |
 | `overview/` | Project orientation, the SerenQA paper, and team planning docs (git-ignored) |
