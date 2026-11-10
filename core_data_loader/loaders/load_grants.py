@@ -19,6 +19,15 @@ PUBLICATIONS_TABLE = "nih_reporter_grant_publications"
 CITED_FILEPATH = "data/grants/cited_publications.csv"
 CITED_TABLE = "nih_reporter_cited_publications"
 
+# Optional, from a teammate (2026-11): grant -> condition / symptom / assay-type
+# keyword hits (the taxon and gene rows duplicate what etl_evidence computes
+# itself and are ignored), and a grant-vs-paper comparison whose 'pubmed_ack'
+# rows are grant -> paper citations taken from the paper's own PubMed grant list.
+OPTIONAL_FILES = [
+    ("data/grants/grant_entity_edges.csv", "nih_reporter_grant_entity_edges"),
+    ("data/grants/grant_paper_divergence.csv", "nih_reporter_grant_paper_divergence"),
+]
+
 
 def main():
     ensure_raw_schema()
@@ -50,6 +59,14 @@ def main():
         else:
             load_to_raw(cited, CITED_TABLE, batch_id=batch_id, source_id=source_id,
                         file_path=CITED_FILEPATH)
+
+        for filepath, table in OPTIONAL_FILES:
+            try:
+                df = pd.read_csv(filepath, dtype=str, keep_default_na=False)
+            except FileNotFoundError:
+                print(f"  (no {filepath}; skipped)")
+                continue
+            load_to_raw(df, table, batch_id=batch_id, source_id=source_id, file_path=filepath)
     except Exception:
         complete_batch(batch_id, status="failed")
         raise

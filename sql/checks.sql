@@ -217,6 +217,17 @@ WITH checks AS (
                       AND el.entity_id = p.publication_id::text)
 
   UNION ALL
+  -- Same rule for papers that entered through a patent's references cited.
+  SELECT 'patent-cited paper with no cites edge', count(*),
+         'a core.publication added from patent references is cited by no patent'
+  FROM core.publication p
+  WHERE p.source_id = (SELECT source_id FROM core.source WHERE source_code='uspto')
+    AND NOT EXISTS (SELECT 1 FROM core.evidence_link el
+                    WHERE el.relation = 'cites' AND el.evidence_type = 'patent'
+                      AND el.entity_type = 'publication'
+                      AND el.entity_id = p.publication_id::text)
+
+  UNION ALL
   -- Features are many-to-one by design (pipeline pairs merge), so they cannot
   -- be counted against raw directly. What CAN be checked is that a merge never
   -- crossed genomes: an unresolved feature's raw rows must all share a genome,

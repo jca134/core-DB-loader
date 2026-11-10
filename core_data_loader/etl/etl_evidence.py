@@ -43,7 +43,7 @@ from core_data_loader.common.etl_common import (
     safe_int, safe_float, safe_date, blank_to_none,
     add_provenance, write_provenance, add_xref, write_xref,
 )
-from core_data_loader.common.kg_keywords import KeywordMatcher, CONFIDENCE
+from core_data_loader.common.kg_keywords import KeywordMatcher, CONFIDENCE, AMBIGUOUS_PENALTY
 
 # Owned outright -- replaced wholesale on every run. core.publication is NOT
 # here: etl_immport writes lineage for it too, so it is passed as a shared
@@ -54,7 +54,13 @@ XREF_ENTITY_TYPES_OWNED = ["grant_award", "grant_funding", "patent", "publicatio
 GRANTS_TABLE = "nih_reporter_grants"
 GRANT_PUBS_TABLE = "nih_reporter_grant_publications"
 CITED_PUBS_TABLE = "nih_reporter_cited_publications"
+GRANT_ENTITY_EDGES_TABLE = "nih_reporter_grant_entity_edges"
+GRANT_DIVERGENCE_TABLE = "nih_reporter_grant_paper_divergence"
 PATENTS_TABLE = "uspto_patents"
+PATENTS_EXPANDED_TABLE = "uspto_patents_expanded"
+PATENT_LINKS_TABLE = "uspto_patent_entity_links"
+PATENT_TEAM_PAPERS_TABLE = "uspto_patent_team_papers"
+PATENT_CITED_PUBS_TABLE = "uspto_patent_cited_publications"
 PAPERS_TABLE = "papers_unique"
 PAPER_REFS_TABLE = "papers_references"
 PAPER_META_TABLE = "papers_metadata"
@@ -415,7 +421,73 @@ def is_filovirus_paper(title: str, mesh_terms: str, abstract: str) -> bool:
     return len(FILOVIRUS_TITLE_RE.findall(abstract or "")) >= 2
 
 
-def build_cited_papers(conn, xref_rows, provenance_rows, sid, bundle_pmids=()):
+UPSERT_CITED_PUBLICATION_SQL = text(
+    """
+    INSERT INTO core.publication
+        (pubmed_id, title, abstract, mesh_terms, authors, journal, year, doi, url, source_id)
+    VALUES (:pubmed_id, :title, :abstract, :mesh_terms, :authors, :journal, :year, :doi, :url, :source_id)
+    ON CONFLICT (pubmed_id) DO UPDATE
+        SET title      = COALESCE(core.publication.title, EXCLUDED.title),
+            abstract   = COALESCE(core.publication.abstract, EXCLUDED.abstract),
+            mesh_terms = COALESCE(core.publication.mesh_terms, EXCLUDED.mesh_terms),
+            authors    = COALESCE(core.publication.authors, EXCLUDED.authors),
+            journal    = COALESCE(core.publication.journal, EXCLUDED.journal),
+            year       = COALESCE(core.publication.year, EXCLUDED.year),
+            doi        = COALESCE(core.publication.doi, EXCLUDED.doi),
+            url        = COALESCE(core.publication.url, EXCLUDED.url),
+            -- A paper both a grant and a patent cite belongs to the grant
+            -- route, which runs first; one left owned by the patent route on
+            -- an earlier run is handed over, or the patent route's cleanup
+            -- could delete a paper a grant still cites.
+            source_id  = CASE WHEN core.publication.source_id = :yield_sid
+                              THEN EXCLUDED.source_id
+                              ELSE COALESCE(core.publication.source_id, EXCLUDED.source_id) END
+    RETURNING publication_id
+    """
+)
+
+
+def _upsert_cited_paper(conn, r, sid, yield_sid=None) -> int:
+    pmid = blank_to_none(r.pmid)
+    return conn.execute(
+        UPSERT_CITED_PUBLICATION_SQL,
+        {
+            "pubmed_id": pmid,
+            "title": blank_to_none(r.title),
+            "abstract": blank_to_none(r.abstract),
+            "mesh_terms": blank_to_none(r.mesh_terms),
+            "authors": blank_to_none(r.authors),
+            "journal": blank_to_none(r.journal),
+            "year": blank_to_none(r.year),
+            "doi": blank_to_none(r.doi),
+            "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+            "source_id": sid,
+            "yield_sid": yield_sid,
+        },
+    ).scalar()
+
+
+def _delete_stale_cited_papers(conn, sid, pmids) -> int:
+    """
+    Rows a cited-paper route added on an earlier run that it no longer keeps.
+    evidence_link was truncated at the start of the run, so nothing points at
+    them yet; study_publication is ImmPort's and is left alone.
+    """
+    return conn.execute(
+        text(
+            """
+            DELETE FROM core.publication p
+            WHERE p.source_id = :sid
+              AND NOT (p.pubmed_id = ANY(:pmids))
+              AND NOT EXISTS (SELECT 1 FROM core.study_publication sp
+                              WHERE sp.publication_id = p.publication_id)
+            """
+        ),
+        {"sid": sid, "pmids": list(pmids)},
+    ).rowcount
+
+
+def build_cited_papers(conn, xref_rows, provenance_rows, sid, bundle_pmids=(), patent_sid=None):
     """
     core.publication rows for the filovirus papers grants cite that the papers
     workstream didn't reach. Without them build_grant_publication_links drops
@@ -447,59 +519,99 @@ def build_cited_papers(conn, xref_rows, provenance_rows, sid, bundle_pmids=()):
         # build_papers; claiming it here would duplicate its lineage.
         if pmid is None or pmid in bundle_pmids:
             continue
-        publication_id = conn.execute(
-            text(
-                """
-                INSERT INTO core.publication
-                    (pubmed_id, title, abstract, mesh_terms, authors, journal, year, doi, url, source_id)
-                VALUES (:pubmed_id, :title, :abstract, :mesh_terms, :authors, :journal, :year, :doi, :url, :source_id)
-                ON CONFLICT (pubmed_id) DO UPDATE
-                    SET title      = COALESCE(core.publication.title, EXCLUDED.title),
-                        abstract   = COALESCE(core.publication.abstract, EXCLUDED.abstract),
-                        mesh_terms = COALESCE(core.publication.mesh_terms, EXCLUDED.mesh_terms),
-                        authors    = COALESCE(core.publication.authors, EXCLUDED.authors),
-                        journal    = COALESCE(core.publication.journal, EXCLUDED.journal),
-                        year       = COALESCE(core.publication.year, EXCLUDED.year),
-                        doi        = COALESCE(core.publication.doi, EXCLUDED.doi),
-                        url        = COALESCE(core.publication.url, EXCLUDED.url),
-                        source_id  = COALESCE(core.publication.source_id, EXCLUDED.source_id)
-                RETURNING publication_id
-                """
-            ),
-            {
-                "pubmed_id": pmid,
-                "title": blank_to_none(r.title),
-                "abstract": blank_to_none(r.abstract),
-                "mesh_terms": blank_to_none(r.mesh_terms),
-                "authors": blank_to_none(r.authors),
-                "journal": blank_to_none(r.journal),
-                "year": blank_to_none(r.year),
-                "doi": blank_to_none(r.doi),
-                "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
-                "source_id": sid,
-            },
-        ).scalar()
+        publication_id = _upsert_cited_paper(conn, r, sid, yield_sid=patent_sid)
         pmids.append(pmid)
         add_xref(xref_rows, "publication", publication_id, sid, "pubmed_id", pmid)
         add_provenance(provenance_rows, "publication", publication_id, sid, CITED_PUBS_TABLE, pmid)
 
-    # evidence_link was truncated at the start of the run, so nothing points at
-    # these yet; study_publication is ImmPort's and is left alone.
-    removed = conn.execute(
-        text(
-            """
-            DELETE FROM core.publication p
-            WHERE p.source_id = :sid
-              AND NOT (p.pubmed_id = ANY(:pmids))
-              AND NOT EXISTS (SELECT 1 FROM core.study_publication sp
-                              WHERE sp.publication_id = p.publication_id)
-            """
-        ),
-        {"sid": sid, "pmids": pmids},
-    ).rowcount
-
+    removed = _delete_stale_cited_papers(conn, sid, pmids)
     print(f"cited papers: {len(pmids)} of {len(raw)} grant-cited papers kept as filovirus papers"
           + (f", {removed} no longer passing removed" if removed else ""))
+    return set(pmids)
+
+
+def build_patent_cited_papers(conn, xref_rows, provenance_rows, sid, claimed_pmids=()):
+    """
+    core.publication rows for every paper a patent cites, resolved from its
+    free-text references by fetch_patent_cited_publications.py. No relevance
+    filter -- see the comment below for why this differs from grants.
+
+    source_id = uspto: the paper entered the KG through a patent. Papers the
+    bundle or a grant already brought in (claimed_pmids) are left to those
+    routes -- they still get their cites edge, from
+    build_patent_publication_links, which resolves against all of
+    core.publication.
+    """
+    if not raw_table_exists(PATENT_CITED_PUBS_TABLE):
+        print(f"patent-cited papers: raw.{PATENT_CITED_PUBS_TABLE} absent, skipped "
+              "(run fetch_patent_cited_publications.py)")
+        return
+    raw = read_raw(PATENT_CITED_PUBS_TABLE).fillna("")
+    resolved = raw[raw["pmid"] != ""].drop_duplicates("pmid")
+    # Every resolved reference is kept, filovirus or not -- unlike grant
+    # citations (is_filovirus_paper). The team decided 2026-11-10: a patent's
+    # references are a short, examiner-vetted list (154 across 39 patents, not
+    # a P51 centre's thousands), and the off-topic ones are the prior art the
+    # invention builds on (HIV gp41 fusion peptides behind a filovirus fusion
+    # inhibitor) -- real provenance, even though those papers link to nothing
+    # else in this KG.
+    kept = resolved
+
+    pmids = []
+    for r in kept.itertuples(index=False):
+        if r.pmid in claimed_pmids:
+            continue
+        publication_id = _upsert_cited_paper(conn, r, sid)
+        pmids.append(r.pmid)
+        add_xref(xref_rows, "publication", publication_id, sid, "pubmed_id", r.pmid)
+        add_provenance(provenance_rows, "publication", publication_id, sid,
+                       PATENT_CITED_PUBS_TABLE, r.pmid)
+
+    removed = _delete_stale_cited_papers(conn, sid, pmids)
+    print(f"patent-cited papers: {raw['citation_text'].nunique()} references, "
+          f"{resolved['pmid'].nunique()} resolved to PubMed, "
+          f"{len(pmids)} new to core.publication"
+          + (f", {removed} no longer passing removed" if removed else ""))
+
+
+def build_patent_publication_links(conn, links, patent_ids, sid):
+    """
+    patent -> paper 'cites' edges: the patents workstream's own PMID-resolved
+    matches, plus every reference fetch_patent_cited_publications.py resolved.
+    A citation is dropped, not guessed, when the paper is not in
+    core.publication (off-topic, or never resolved).
+    """
+    pub_ids = dict(conn.execute(text("SELECT pubmed_id, publication_id FROM core.publication")).fetchall())
+    rows = []
+    if raw_table_exists(PATENT_TEAM_PAPERS_TABLE):
+        for r in read_raw(PATENT_TEAM_PAPERS_TABLE).fillna("").itertuples(index=False):
+            rows.append((r.patent_id, r.pmid, r.citation_text or r.team_paper_title,
+                         f"patents_workstream:{r.match_type}"))
+    if raw_table_exists(PATENT_CITED_PUBS_TABLE):
+        for r in read_raw(PATENT_CITED_PUBS_TABLE).fillna("").itertuples(index=False):
+            if r.pmid:
+                rows.append((r.patent_id, r.pmid, r.citation_text, f"pubmed_resolved:{r.resolve_method}"))
+    if not rows:
+        print("patent -> paper links: no citation tables, skipped")
+        return
+
+    linked = unmatched_patent = unmatched_pub = 0
+    for patent_doc, pmid, citation, how in rows:
+        patent_id = patent_ids.get(normalize_document_id(patent_doc))
+        publication_id = pub_ids.get(blank_to_none(pmid))
+        if patent_id is None:
+            unmatched_patent += 1
+            continue
+        if publication_id is None:
+            unmatched_pub += 1
+            continue
+        links.add("patent", patent_id, "publication", publication_id, "cites",
+                  CONFIDENCE["identifier"], sid,
+                  _support("identifier", "citation", matched_term=blank_to_none(citation),
+                           term_type=how))
+        linked += 1
+    print(f"patent -> paper: {linked} citations linked "
+          f"({unmatched_patent} unmatched patent, {unmatched_pub} paper not in core.publication)")
 
 
 def build_grant_publication_links(conn, links, award_ids, sid):
@@ -538,6 +650,137 @@ def build_grant_publication_links(conn, links, award_ids, sid):
           f"({unmatched_award} unmatched award, {unmatched_pub} paper not in core.publication)")
 
 
+# "Fever" inside a disease name is not the symptom: "Ebola hemorrhagic fever",
+# "yellow fever virus". Unmasked, every grant about VHF links to HP:0001945.
+# Masked out of the text before a symptom keyword is checked. 'ha?emorr?hagic'
+# because abstracts misspell it ("Crimean Congo Hemorhagic Fever").
+DISEASE_NAME_RE = re.compile(
+    r"(?<![0-9A-Za-z])(?:viral\s+)?(?:ha?emorr?hagic|yellow|dengue|lassa|rift\s+valley|"
+    r"crimean[\s-]+congo|scarlet|typhoid|rheumatic|hay|q|marburg|ebola)\s+fevers?"
+    r"(?:\s+virus(?:es)?)?(?![0-9A-Za-z])",
+    re.IGNORECASE,
+)
+CLINICAL_ENTITY_TYPES = ("condition", "symptom", "assay_type")
+
+
+def build_grant_clinical_links(conn, links, sid):
+    """
+    grant -> condition / symptom / assay_type keyword links from a teammate's
+    grant_entity_edges.csv. etl_evidence's own matcher covers taxa and genes
+    only, so these are the file's new information; its taxon and gene rows
+    duplicate what build_grants computes (apart from taxonomy-version genus
+    ids) and are ignored.
+
+    Not taken on trust. Each row is re-checked against the grant text stored
+    in core.grant_funding: a row survives only if one of its keywords occurs
+    as a whole word in the field it claims, and for symptoms only outside a
+    disease name (DISEASE_NAME_RE). The support row names the fiscal year the
+    term was found in. Entities resolve by ontology id (DOID, HP, OBI), never
+    by the file's ids; conditions not in core.condition are dropped.
+
+    Awards resolve through the RePORTER appl_id in each row's URL, because the
+    file keys contracts differently from award_key().
+    """
+    if not raw_table_exists(GRANT_ENTITY_EDGES_TABLE):
+        return
+    raw = read_raw(GRANT_ENTITY_EDGES_TABLE).fillna("")
+    raw = raw[raw["matched_entity_type"].isin(CLINICAL_ENTITY_TYPES)]
+
+    award_by_appl = dict(conn.execute(text(
+        """
+        SELECT x.xref_value, f.grant_award_id FROM core.xref x
+        JOIN core.grant_funding f ON f.grant_funding_id = x.entity_id::bigint
+        WHERE x.entity_type = 'grant_funding' AND x.xref_type = 'nih_appl_id'
+        """
+    )).fetchall())
+    funding_text = {}
+    for award_id, funding_id, title, abstract in conn.execute(text(
+        "SELECT grant_award_id, grant_funding_id, project_title, abstract_text "
+        "FROM core.grant_funding ORDER BY fiscal_year"
+    )):
+        funding_text.setdefault(award_id, []).append((funding_id, title or "", abstract or ""))
+
+    entity_ids = {
+        "condition": dict(conn.execute(text(
+            "SELECT ontology_id, min(condition_id) FROM core.condition "
+            "WHERE ontology_id IS NOT NULL GROUP BY 1")).fetchall()),
+        "symptom": dict(conn.execute(text("SELECT hpo_id, symptom_id FROM core.symptom")).fetchall()),
+        "assay_type": dict(conn.execute(text(
+            "SELECT obi_id, assay_type_id FROM core.assay_type WHERE obi_id IS NOT NULL")).fetchall()),
+    }
+    assay_by_name = {n.lower(): i for i, n in conn.execute(
+        text("SELECT assay_type_id, name FROM core.assay_type"))}
+
+    kept = 0
+    dropped = {}
+    for r in raw.itertuples(index=False):
+        appl = re.search(r"project-details/(\d+)", r.url)
+        award_id = award_by_appl.get(appl.group(1)) if appl else None
+        entity_id = entity_ids[r.matched_entity_type].get(r.matched_entity_id)
+        if entity_id is None and r.matched_entity_type == "assay_type":
+            entity_id = assay_by_name.get(r.entity_name.lower())
+        if award_id is None or entity_id is None:
+            reason = "award not in core.grant_award" if award_id is None else \
+                f"{r.matched_entity_type} {r.matched_entity_id} not in core"
+            dropped[reason] = dropped.get(reason, 0) + 1
+            continue
+
+        found = None
+        for term in filter(None, (t.strip() for t in r.matched_keyword.split(";"))):
+            pattern = re.compile(rf"(?<![0-9A-Za-z]){re.escape(term)}(?![0-9A-Za-z])", re.IGNORECASE)
+            for funding_id, title, abstract in funding_text.get(award_id, []):
+                value = title if r.match_field == "title" else abstract
+                if r.matched_entity_type == "symptom":
+                    value = DISEASE_NAME_RE.sub(" ", value)
+                if pattern.search(value):
+                    found = (term, funding_id)
+                    break
+            if found:
+                break
+        if found is None:
+            reason = f"{r.matched_entity_type} keyword not in grant text"
+            dropped[reason] = dropped.get(reason, 0) + 1
+            continue
+
+        requires_context = r.requires_context.lower() == "true"
+        confidence = CONFIDENCE[r.match_field] * (AMBIGUOUS_PENALTY if requires_context else 1)
+        links.add("grant_award", award_id, r.matched_entity_type, entity_id, "related",
+                  round(confidence, 2), sid,
+                  _support(r.match_field, r.match_method if r.match_method in ("keyword", "synonym") else "keyword",
+                           found[0], "teammate_grant_entity_edges", requires_context, found[1]))
+        kept += 1
+
+    print(f"grant -> condition/symptom/assay_type: {kept} of {len(raw)} hits kept")
+    for reason, count in sorted(dropped.items(), key=lambda kv: -kv[1]):
+        print(f"  ! dropped {count}: {reason}")
+
+
+def build_grant_ack_links(conn, links, award_ids, sid):
+    """
+    grant -> paper 'cites' edges from the paper side: the grant numbers a
+    PubMed record acknowledges (link_basis 'pubmed_ack' in the teammate's
+    grant_paper_divergence.csv). Most duplicate a RePORTER edge and only add a
+    support row; the rest are citations RePORTER does not list. The file's
+    divergence statistics are analysis output and are not stored.
+    """
+    if not raw_table_exists(GRANT_DIVERGENCE_TABLE):
+        return
+    raw = read_raw(GRANT_DIVERGENCE_TABLE).fillna("")
+    raw = raw[raw["link_basis"].str.contains("pubmed_ack")]
+    pub_ids = dict(conn.execute(text("SELECT pubmed_id, publication_id FROM core.publication")).fetchall())
+    linked = skipped = 0
+    for r in raw.itertuples(index=False):
+        award_id, publication_id = award_ids.get(r.award_key), pub_ids.get(r.pmid)
+        if award_id is None or publication_id is None:
+            skipped += 1
+            continue
+        links.add("grant_award", award_id, "publication", publication_id, "cites",
+                  CONFIDENCE["identifier"], sid,
+                  _support("identifier", "citation", term_type="pubmed_grant_acknowledgement"))
+        linked += 1
+    print(f"grant -> paper (PubMed acknowledgements): {linked} links, {skipped} unresolved")
+
+
 # ---------------------------------------------------------------------------
 # Patents
 # ---------------------------------------------------------------------------
@@ -553,16 +796,82 @@ QUERY_ORGANISM_TAXA = {
 }
 
 
+DOCUMENT_ID_RE = re.compile(r"^\s*([A-Z]{2})\s*(\d+)\s*([A-Z]\d?)\s*$")
+
+
+def normalize_document_id(value: str) -> str | None:
+    """
+    'US20180291088A1' and 'US 20180291088 A1' are the same patent; the
+    patents workstream's files use both. core.patent stores the spaced form
+    the USPTO export uses.
+    """
+    m = DOCUMENT_ID_RE.match(value or "")
+    return f"{m.group(1)} {m.group(2)} {m.group(3)}" if m else blank_to_none(value)
+
+
+def _family_id(value: str) -> str | None:
+    """The expanded file's family_id went through a float ('78828615.0')."""
+    value = blank_to_none(value)
+    return value[:-2] if value and value.endswith(".0") else value
+
+
+def _patent_groups():
+    """
+    (document_id, rows) for every patent, from the four CPC exports and, when
+    present, the expanded file's additional patents. The expanded file repeats
+    the 72 exported patents with identical fields; for those the export stays
+    authoritative because only it carries query_organism. Expanded rows are
+    renamed onto the export's column names so one insert path serves both.
+    """
+    raw = read_raw(PATENTS_TABLE).fillna("")
+    groups = list(raw.groupby("document_id", sort=False))
+    if not raw_table_exists(PATENTS_EXPANDED_TABLE):
+        return groups, 0
+
+    seen = {doc for doc, _ in groups}
+    expanded = read_raw(PATENTS_EXPANDED_TABLE).fillna("")
+    expanded = expanded.rename(columns={"patent_id": "document_id", "date": "date_published"})
+    expanded["document_id"] = expanded["document_id"].map(normalize_document_id)
+    expanded["family_id"] = expanded["family_id"].map(lambda v: _family_id(v) or "")
+    # No query_organism: these came from an abstract search, not a per-organism
+    # CPC export, so they get no query_scope taxon link.
+    expanded["query_organism"] = ""
+    added = expanded[~expanded["document_id"].isin(seen)]
+    return groups + list(added.groupby("document_id", sort=False)), added["document_id"].nunique()
+
+
+def _patent_abstract_hits(matcher):
+    """
+    document_id -> keyword hits in the patent's abstract, from the patents
+    workstream's entity-link file. The abstracts were not supplied, so each
+    matched keyword is re-run through the shared matcher: that resolves it to
+    a live entity exactly as a title hit would be, and drops any keyword the
+    vocabulary does not carry. Title rows are ignored -- build_patents matches
+    titles itself.
+    """
+    if not raw_table_exists(PATENT_LINKS_TABLE):
+        return {}
+    hits = {}
+    for r in read_raw(PATENT_LINKS_TABLE).fillna("").itertuples(index=False):
+        if r.match_location != "abstract":
+            continue
+        doc = normalize_document_id(r.patent_id)
+        hits.setdefault(doc, []).extend(matcher.match(r.matched_keyword, "abstract"))
+    return hits
+
+
 def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
     if not raw_table_exists(PATENTS_TABLE):
         print("core.patent: raw.uspto_patents absent, skipped")
-        return
+        return {}
 
-    raw = read_raw(PATENTS_TABLE).fillna("")
     taxon_ids = {row[0] for row in conn.execute(text("SELECT taxon_id FROM core.taxon"))}
+    groups, expanded_count = _patent_groups()
+    abstract_hits = _patent_abstract_hits(matcher)
 
+    patent_ids = {}
     patent_count = cpc_count = dropped_no_context = 0
-    for document_id, group in raw.groupby("document_id", sort=False):
+    for document_id, group in groups:
         first = group.iloc[0]
         kind = KIND_CODE_RE.search(document_id)
 
@@ -598,6 +907,7 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
             },
         ).scalar()
         patent_count += 1
+        patent_ids[document_id] = patent_id
         add_xref(xref_rows, "patent", patent_id, sid, "uspto_document_id", document_id)
         add_xref(xref_rows, "patent", patent_id, sid, "uspto_application_num", first["application_number"])
         add_provenance(provenance_rows, "patent", patent_id, sid, PATENTS_TABLE, document_id)
@@ -637,6 +947,7 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
         # patent can actually claim -- an antibody or a gene product named in the
         # title is the subject matter, not an incidental mention.
         patent_hits.extend(matcher.match(first["title"], "title"))
+        patent_hits.extend(abstract_hits.get(document_id, []))
 
         has_context = organism_context_established(patent_hits)
         for hit in patent_hits:
@@ -650,16 +961,18 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
                       _support(hit["match_field"], hit["match_method"], hit["matched_term"],
                                hit["term_type"], hit["requires_context"]))
 
-    print(f"core.patent: {patent_count} rows, core.patent_cpc: {cpc_count} rows")
+    print(f"core.patent: {patent_count} rows ({expanded_count} from the expanded search), "
+          f"core.patent_cpc: {cpc_count} rows")
     if dropped_no_context:
         print(f"  {dropped_no_context} ambiguous-term hits dropped (patent names no organism)")
+    return patent_ids
 
 
 # ---------------------------------------------------------------------------
 # Papers
 # ---------------------------------------------------------------------------
 
-def build_papers(conn, links, xref_rows, provenance_rows, sid, cited_sid=None):
+def build_papers(conn, links, xref_rows, provenance_rows, sid, cited_sid=None, patent_sid=None):
     if not raw_table_exists(PAPERS_TABLE):
         print("core.publication: raw.papers_unique absent, skipped")
         return {}
@@ -707,7 +1020,7 @@ def build_papers(conn, links, xref_rows, provenance_rows, sid, cited_sid=None):
                         -- now in the bundle belongs to the bundle; otherwise
                         -- build_cited_papers would treat it as its own and could
                         -- delete it. Any other existing source (ImmPort) is kept.
-                        source_id = CASE WHEN core.publication.source_id = :cited_sid
+                        source_id = CASE WHEN core.publication.source_id IN (:cited_sid, :patent_sid)
                                          THEN EXCLUDED.source_id
                                          ELSE COALESCE(core.publication.source_id, EXCLUDED.source_id) END
                 RETURNING publication_id
@@ -724,6 +1037,7 @@ def build_papers(conn, links, xref_rows, provenance_rows, sid, cited_sid=None):
                 "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
                 "source_id": sid,
                 "cited_sid": cited_sid,
+                "patent_sid": patent_sid,
             },
         ).scalar()
         publication_ids[pmid] = publication_id
@@ -909,14 +1223,21 @@ def main():
     with engine.begin() as conn:
         award_ids = build_grants(conn, matcher, links, xref_rows, provenance_rows,
                                   source_ids["nih_reporter"])
-        build_patents(conn, matcher, links, xref_rows, provenance_rows, source_ids["uspto"])
+        build_grant_clinical_links(conn, links, source_ids["nih_reporter"])
+        patent_ids = build_patents(conn, matcher, links, xref_rows, provenance_rows, source_ids["uspto"])
         publication_ids = build_papers(conn, links, xref_rows, provenance_rows,
-                                        source_ids["pubmed"], source_ids["nih_reporter"])
+                                        source_ids["pubmed"], source_ids["nih_reporter"],
+                                        source_ids["uspto"])
         build_paper_links(conn, links, publication_ids, source_ids, source_ids["pubmed"])
         # Before the citation links: those resolve PMIDs against core.publication.
-        build_cited_papers(conn, xref_rows, provenance_rows, source_ids["nih_reporter"],
-                           bundle_pmids=set(publication_ids))
+        grant_cited = build_cited_papers(conn, xref_rows, provenance_rows, source_ids["nih_reporter"],
+                                         bundle_pmids=set(publication_ids),
+                                         patent_sid=source_ids["uspto"])
+        build_patent_cited_papers(conn, xref_rows, provenance_rows, source_ids["uspto"],
+                                  claimed_pmids=set(publication_ids) | (grant_cited or set()))
         build_grant_publication_links(conn, links, award_ids, source_ids["nih_reporter"])
+        build_grant_ack_links(conn, links, award_ids, source_ids["nih_reporter"])
+        build_patent_publication_links(conn, links, patent_ids, source_ids["uspto"])
 
         link_rows, support_rows = links.write(conn, provenance_rows)
         print(f"core.evidence_link: {link_rows} rows")
@@ -940,11 +1261,13 @@ def main():
 
     write_xref(xref_rows, XREF_ENTITY_TYPES_OWNED)
     # core.publication is shared with etl_immport, so this script replaces only
-    # the lineage rows it is responsible for -- pubmed (the papers bundle) and
-    # nih_reporter (papers that entered through a grant's citations).
+    # the lineage rows it is responsible for -- pubmed (the papers bundle),
+    # nih_reporter and uspto (papers that entered through a grant's or a
+    # patent's citations).
     write_provenance(provenance_rows, PROVENANCE_TABLES_OWNED,
                       shared_tables={"publication": [source_ids["pubmed"],
-                                                     source_ids["nih_reporter"]]})
+                                                     source_ids["nih_reporter"],
+                                                     source_ids["uspto"]]})
 
     if orphans:
         for entity_type, count in orphans:
