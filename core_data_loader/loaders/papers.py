@@ -35,10 +35,12 @@ METADATA_TABLE = "papers_metadata"
 CITATIONS_FILEPATH = data_path("papers", "paper_citations.csv")
 CITATIONS_TABLE = "papers_citations"
 
-# Written by `filovirus fetch paper-grants`: the grants each paper's PubMed
-# record acknowledges (GrantList).
+# Written by `filovirus fetch paper-details`: the grants each paper's PubMed
+# record acknowledges (GrantList), and when it went online.
 GRANTS_FILEPATH = data_path("papers", "paper_grants.csv")
 GRANTS_TABLE = "papers_grants"
+DATES_FILEPATH = data_path("papers", "paper_dates.csv")
+DATES_TABLE = "papers_dates"
 
 
 def main():
@@ -55,7 +57,9 @@ def main():
         batch.load_optional(CITATIONS_FILEPATH, CITATIONS_TABLE,
                             "run `filovirus fetch paper-citations` to add paper -> paper citations")
         batch.load_optional(GRANTS_FILEPATH, GRANTS_TABLE,
-                            "run `filovirus fetch paper-grants` to add the grants papers acknowledge")
+                            "run `filovirus fetch paper-details` to add the grants papers acknowledge")
+        batch.load_optional(DATES_FILEPATH, DATES_TABLE,
+                            "run `filovirus fetch paper-details` to date papers by when they went online")
     print("Finished loading papers files.")
 
 

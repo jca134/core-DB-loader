@@ -295,22 +295,19 @@ def test_core_project_number_pattern_finds_grant_numbers_in_text():
 
 
 def test_grant_numbers_are_found_in_government_interest_statements():
-    from core_data_loader.etl.evidence import CONTRACT_IN_TEXT_RE, GRANT_IN_TEXT_RE
+    from core_data_loader.etl.evidence import CONTRACT_IN_TEXT_RE, parse_grant_numbers
     s = ("This invention was made with government support under R43 AI066487-01, U19AI109762 and "
          "contract HHSN272201400058C awarded by the NIH, and W31P4Q-15-1-0003 awarded by DARPA.")
-    from core_data_loader.etl.evidence import grant_serial
-    grants = {grant_serial(m) for m in GRANT_IN_TEXT_RE.finditer(s)}
-    assert {"AI066487", "AI109762"} <= grants
-    older = "under NIH Grant Nos. AI 51292 and Grant A1057153 from the NIH"
-    assert {grant_serial(m) for m in GRANT_IN_TEXT_RE.finditer(older)} == {"AI051292", "AI057153"}
+    assert {serial for _, serial in parse_grant_numbers(s)} >= {"AI066487", "AI109762"}
     assert [m.group(1) for m in CONTRACT_IN_TEXT_RE.finditer(s)] == ["272201400058"]
+    older = "under NIH Grant Nos. AI 51292 and Grant A1057153 from the NIH"
+    assert {serial for _, serial in parse_grant_numbers(older)} == {"AI051292", "AI057153"}
 
 
-def test_acknowledged_grant_numbers_keep_their_activity_code():
-    from core_data_loader.etl.evidence import ACKNOWLEDGED_GRANT_RE
-    parsed = [(m.group(1), m.group(2) + m.group(3).zfill(6))
-              for g in ("K08-AI079381", "T32 GM007215", "ZIA AI005081", "AI109762", "1R43AI066487-01")
-              for m in ACKNOWLEDGED_GRANT_RE.finditer(g)]
+def test_grant_numbers_keep_their_activity_code():
+    from core_data_loader.etl.evidence import parse_grant_numbers
+    parsed = [n for g in ("K08-AI079381", "T32 GM007215", "ZIA AI005081", "AI109762", "1R43AI066487-01")
+              for n in parse_grant_numbers(g)]
     assert parsed == [("K08", "AI079381"), ("T32", "GM007215"), ("ZIA", "AI005081"),
                       (None, "AI109762"), ("R43", "AI066487")]
 
@@ -335,3 +332,13 @@ def test_umbrella_contracts_link_nothing_but_one_project_contracts_link_all_its_
                  ("272201400058C00", 3, "b-cell epitopes"), ("272201400058C10", 4, "b-cell epitopes")]
     assert contract_targets("HHSN261201500003C", contracts) == set()
     assert contract_targets("HHSN272201400058C", contracts) == {3, 4}
+
+
+
+def test_new_format_contract_numbers_match_in_full():
+    # A 12-character prefix of "75N93020C00012" is shared by ...013, ...014.
+    from core_data_loader.etl.evidence import contract_targets
+    contracts = [("75N93020C000120", 1, "vaccine a"), ("75N93020C000130", 2, "vaccine b")]
+    assert contract_targets("75N93020C00012", contracts) == {1}
+    # Old HHSN numbers still tolerate a misprinted type letter after their 12 digits.
+    assert contract_targets("HHSN2722013000181", [("272201300018I0", 3, "vteu")]) == {3}

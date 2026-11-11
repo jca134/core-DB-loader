@@ -137,6 +137,24 @@ def parse_grant_list(art: ET.Element) -> list[dict]:
     ]
 
 
+def parse_electronic_date(art: ET.Element) -> str:
+    """
+    When the paper went online ('YYYY-MM-DD'), or '' if PubMed has no
+    electronic date. Journals often publish online months or years before the
+    print issue that PubDate (and so the year) records.
+    """
+    d = art.find("MedlineCitation/Article/ArticleDate[@DateType='Electronic']")
+    if d is None:
+        return ""
+    y, m, day = d.findtext("Year", ""), d.findtext("Month", "1"), d.findtext("Day", "1")
+    if not y.isdigit():
+        return ""
+    try:
+        return f"{int(y):04d}-{int(m):02d}-{int(day):02d}"
+    except ValueError:
+        return f"{int(y):04d}-01-01"
+
+
 def _text(el) -> str:
     """All text inside an element, including nested markup like <i>Ebola</i>."""
     return " ".join("".join(el.itertext()).split()) if el is not None else ""

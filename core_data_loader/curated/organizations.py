@@ -86,14 +86,26 @@ DISPLAY = {
 }
 
 KIND_RULES = [
-    ("government", r"\b(US ARMY|UNITED STATES|US DEPARTMENT|DEPARTMENT OF|NATIONAL INSTITUTE|NATIONAL INSTITUTES|"
-                   r"CENTERS FOR DISEASE|NCI|FOOD AND DRUG|NAVY|AIR FORCE|COMMISSARIAT|ACADEMY OF MILITARY|PLA)\b"),
-    ("university", r"\b(UNIVERSITY|COLLEGE|SCHOOL OF MEDICINE|INSTITUTE OF TECHNOLOGY)\b"),
-    ("hospital", r"\b(HOSPITAL|MEDICAL CENTER|CHILDREN S MEDICAL|CLINIC)\b"),
-    ("company", r"\b(BIO|PHARMA|THERAPEUTICS|VACCINES|BIOSCIENCES|BIOTECH|SCIENCES|TECHNOLOGIES|LABORATORIES|"
-                r"GENENTECH|REGENERON|LEIDOS|BIOHUB|MOLECULAR)\w*"),
-    ("nonprofit", r"\b(INSTITUTE|FOUNDATION|RESEARCH)\b"),
+    # NIH institutes, centers and divisions file grants under their own names
+    # ("NATIONAL EYE INSTITUTE", "DIVISION OF CANCER TREATMENT").
+    ("government", r"\b(US ARMY|UNITED STATES|US GOVERNMENT|US DEPARTMENT|DEPARTMENT|CENTERS FOR DISEASE|"
+                   r"FOOD AND DRUG|NAVY|AIR FORCE|COMMISSARIAT|ACADEMY OF MILITARY|PLA|NIH|NIAID|NCI|"
+                   r"NATIONAL INSTITUTES? OF|PUBLIC HEALTH|BUREAU OF|CABINET|CNRS|INSERM|INSTITUT NATIONAL|"
+                   r"FEDERATED STATES)\b|"
+                   r"^NATIONAL [A-Z ]*(INSTITUTE|INSTITUTES|CENTER)\b|^DIVISION OF\b|^OFFICE OF\b|^CLINICAL CENTER$"),
+    ("university", r"\b(UNIVERSITY|UNIVERSITE|UNIVERSITAT|COLLEGE|ECOLE|SCHOOL OF MEDICINE|MEDICAL SCHOOL|"
+                   r"INSTITUTE OF TECHNOLOGY)\b"),
+    ("hospital", r"\b(HOSPITAL|HOSPITALIER|MEDICAL CENTER|CHILDREN S MEDICAL|CLINIC)\b"),
+    ("company", r"\b(BIOSCIENCES?|BIOTECH\w*|BIOTHERAPEUTICS|BIOSOLUTIONS|BIOPHARMA\w*|BIOLOGICS|BIOLOGICALS|"
+                r"PHARMA\w*|THERAPEUTICS|VACCINES|TECHNOLOGIES|LABORATORIES|GENENTECH|REGENERON|LEIDOS|BIOHUB)\b"),
+    ("nonprofit", r"\b(INSTITUTE|INSTITUT|ZENTRUM|FOUNDATION|FDN|RESEARCH|SOCIETY|INTERNATIONAL)\b"),
 ]
+# A legal suffix on any source spelling ("Inc.", "LLC", "A/S", "Corp") says
+# company once the rules above have had their say -- "Dana-Farber Cancer
+# Institute, Inc." is still a nonprofit institute.
+LEGAL_SUFFIX_RE = re.compile(
+    r"[\s,](Inc|LLC|L\.L\.C|Ltd|Limited|Corp|Corporation|Co|B\.?V|N\.?V|A/?S|AB|AG|SE|SA|SAS|GmbH|PLC)\.?\s*$",
+    re.IGNORECASE)
 
 PERSON_RE = re.compile(r"^[A-Za-z' -]+; ?[A-Za-z' .-]+$")   # "Hiatt; Andrew"
 SUFFIX_RE = re.compile(r"^\s*(Inc|LLC|Ltd|Corp|Co|B\.?V|N\.?V|A/?S|AG|SE|SA|GmbH|PLC|L\.?P)\.?\s*$", re.IGNORECASE)
@@ -117,7 +129,9 @@ def split_names(field: str | None) -> list[str]:
             names[-1] = f"{names[-1]},{part}"
         elif part.strip():
             names.append(part.strip())
-    return [n for n in dict.fromkeys(names) if not PERSON_RE.match(n) and normalize(n)]
+    # A two-letter fragment is a state left over from an address ("Ft Detrick,Md,..."), not an organization.
+    return [n for n in dict.fromkeys(names)
+            if not PERSON_RE.match(n) and normalize(n) and not re.fullmatch(r"[A-Za-z]{2}\.?", n)]
 
 
 def normalize(name: str) -> str:
@@ -150,10 +164,12 @@ def normalize(name: str) -> str:
     return ALIASES.get(key, key)
 
 
-def kind_of(key: str) -> str:
+def kind_of(key: str, spellings=()) -> str:
     for kind, pattern in KIND_RULES:
         if re.search(pattern, key):
             return kind
+    if any(LEGAL_SUFFIX_RE.search(s) for s in spellings):
+        return "company"
     return "other"
 
 

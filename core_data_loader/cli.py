@@ -52,8 +52,8 @@ FETCHERS = {
                        "Google Patents: abstracts, dates, and patent-to-patent citations"),
     "paper-citations": ("core_data_loader.fetchers.paper_citations",
                         "PubMed: which papers cite which (run after the other fetchers)"),
-    "paper-grants": ("core_data_loader.fetchers.paper_grants",
-                     "PubMed: the grants each paper acknowledges (run after the other fetchers)"),
+    "paper-details": ("core_data_loader.fetchers.paper_details",
+                      "PubMed: each graph paper's acknowledged grants and online date (run after the others)"),
 }
 
 

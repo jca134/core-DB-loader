@@ -38,7 +38,7 @@ grant/patent pairs and told you nothing.
 
 | Edge | Source | Kept when |
 | --- | --- | --- |
-| grant `cites` paper | NIH RePORTER publication lists, plus the paper's own PubMed grant list (`fetch paper-grants`): a GrantID naming the activity code links that award, a bare serial links every award of the NIH project | the paper is in `core.publication` |
+| grant `cites` paper | NIH RePORTER publication lists, plus the paper's own PubMed grant list (`fetch paper-details`): a GrantID naming the activity code links that award, a bare serial links every award of the NIH project | the paper is in `core.publication` |
 | patent `cites` paper | the patent's references cited, resolved on PubMed | always (all resolved papers are kept) |
 | paper `cites` paper | the citing paper's PubMed reference list (`fetch paper-citations`); only papers with full text in PubMed Central have one | both papers are in `core.publication` |
 | patent `cites` patent | the Google Patents citation tables, read from both ends: A's "cites" and B's "cited by" (`fetch patent-details`) | both patents are in `core.patent` |
