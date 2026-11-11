@@ -928,19 +928,59 @@ def build_document_citations(conn, links, patent_ids, source_ids):
 # Grant -> patent: the patent's federal-support statement
 # ---------------------------------------------------------------------------
 
-# An NIH research grant inside free text: optional type/activity prefix, the
-# institute code, the serial: "AI066487", "R43 AI066487-01", "U19 AI-109762".
-# Patents also write the serial without its leading zero ("AI 51292" is
-# AI051292) and misprint the institute ("A1057153" for AI057153).
-GRANT_IN_TEXT_RE = re.compile(r"(?<![A-Z0-9])(?:\d?[A-Z]\d{2}\s?)?([A-Z][A-Z1])\s?-?\s?(\d{5,6})(?!\d)")
+# An NIH grant number in free text or a PubMed GrantList: optional activity
+# code (R01, K08, T32, or intramural ZIA), the institute, the serial:
+# "R43 AI066487-01", "U19AI109762", "K08-AI079381", "ZIA AI005081". Sources
+# also drop the serial's leading zero ("AI 51292" is AI051292) and misprint the
+# institute ("A1057153" for AI057153).
+GRANT_NUMBER_RE = re.compile(
+    r"(?<![A-Z0-9])(?:\d?([A-Z]\d{2}|Z[A-Z0-9]{2})[\s-]?)?([A-Z][A-Z1])\s?-?\s?(\d{5,6})(?!\d)")
+# Every NIH core project number in the graph, intramural (ZIA...) included.
+AWARD_SERIAL_RE = re.compile(r"^([A-Z]\d{2}|Z[A-Z0-9]{2})([A-Z]{2}\d{6})$")
 
 
-def grant_serial(match) -> str:
-    """'AI051292' from a GRANT_IN_TEXT_RE match: institute fixed, serial zero-padded."""
-    institute = "AI" if match.group(1) == "A1" else match.group(1)
-    return institute + match.group(2).zfill(6)
+def parse_grant_numbers(text_: str) -> list[tuple[str | None, str]]:
+    """(activity code or None, institute + 6-digit serial) for each NIH grant number in the text."""
+    out = []
+    for m in GRANT_NUMBER_RE.finditer((text_ or "").upper()):
+        institute = "AI" if m.group(2) == "A1" else m.group(2)
+        out.append((m.group(1), institute + m.group(3).zfill(6)))
+    return out
+
+
 # NIH contracts: "HHSN272201400058C", "HHSN-261-2015-00003I", "75N93020C00012".
 CONTRACT_IN_TEXT_RE = re.compile(r"HHSN[\s-]?([\d\s-]{9,16})[A-Z]?|(75N9\d{4}[A-Z]\d{5})")
+
+
+class GrantNumbers:
+    """
+    Resolves grant and contract numbers found in a document to the awards in
+    the graph. A number naming its activity code ("R43 AI066487") links that
+    award only; a bare serial ("AI066487") links every award of the NIH project
+    (R43 -> R44 ...). Contracts go through contract_targets. Anything else --
+    other agencies, foreign funders -- has no grant node and matches nothing.
+    """
+
+    def __init__(self, conn):
+        self.by_core, self.by_serial = {}, {}
+        for award_id, core in conn.execute(text("SELECT grant_award_id, core_project_num FROM core.grant_award")):
+            m = AWARD_SERIAL_RE.match(core or "")
+            if m:
+                self.by_core.setdefault(core, set()).add(award_id)
+                self.by_serial.setdefault(m.group(2), set()).add(award_id)
+        self.contracts = contract_awards(conn)
+
+    def match(self, text_: str) -> dict:
+        """award_id -> the grant number it was found as (normalized, e.g. 'R43AI066487'), for every award named."""
+        targets = {}
+        for activity, serial in parse_grant_numbers(text_):
+            exact = self.by_core.get(f"{activity}{serial}") if activity else None
+            for award_id in exact or self.by_serial.get(serial, ()):
+                targets.setdefault(award_id, f"{activity or ''}{serial}")
+        for m in CONTRACT_IN_TEXT_RE.finditer((text_ or "").upper()):
+            for award_id in contract_targets(m.group(1) or m.group(2), self.contracts):
+                targets.setdefault(award_id, m.group(0).strip())
+        return targets
 
 
 def contract_awards(conn) -> list[tuple[str, int, str]]:
@@ -962,7 +1002,12 @@ def contract_targets(number: str, contracts) -> set:
     number = re.sub(r"[^0-9A-Z]", "", number.upper()).removeprefix("HHSN")
     if len(number) < 9:
         return set()
-    matched = [(award_id, title) for key, award_id, title in contracts if key.startswith(number[:12])]
+    # Old HHSN numbers are 12 digits + a type letter, often misprinted after the
+    # digits ("...0181" for "...018I"), so they match on the digits. Newer
+    # numbers ("75N93020C00012") match in full: a 12-character prefix of one is
+    # shared by other contracts.
+    prefix = number[:12] if re.match(r"\d{12}", number) else number
+    matched = [(award_id, title) for key, award_id, title in contracts if key.startswith(prefix)]
     return {a for a, _ in matched} if len({t for _, t in matched}) == 1 else set()
 
 
@@ -981,14 +1026,7 @@ def build_grant_patent_links(conn, links, patent_ids, sid):
         print("grant -> patent: no government-interest statements fetched, skipped")
         return
 
-    by_serial = {}
-    for award_id, core in conn.execute(text("SELECT grant_award_id, core_project_num FROM core.grant_award")):
-        m = PROJECT_SERIAL_RE.match(core or "")
-        if m:
-            by_serial.setdefault(m.group(1), set()).add(award_id)
-    contracts = contract_awards(conn)
-    institutes = {serial[:2] for serial in by_serial}
-
+    grants = GrantNumbers(conn)
     statements = linked = 0
     for r in details.itertuples(index=False):
         statement = r.government_interest
@@ -996,16 +1034,7 @@ def build_grant_patent_links(conn, links, patent_ids, sid):
         if not statement or patent_id is None:
             continue
         statements += 1
-        targets = {}
-        for m in GRANT_IN_TEXT_RE.finditer(statement):
-            serial = grant_serial(m)
-            if serial[:2] in institutes:
-                for award_id in by_serial.get(serial, ()):
-                    targets[award_id] = m.group(0).strip()
-        for m in CONTRACT_IN_TEXT_RE.finditer(statement):
-            for award_id in contract_targets(m.group(1) or m.group(2), contracts):
-                targets[award_id] = m.group(0).strip()
-        for award_id, number in targets.items():
+        for award_id, number in grants.match(statement).items():
             links.add("grant_award", award_id, "patent", patent_id, "funds", CONFIDENCE["identifier"], sid,
                       _support("identifier", "exact_id", number, "patent_government_interest"))
             linked += 1
@@ -1017,18 +1046,12 @@ def build_grant_patent_links(conn, links, patent_ids, sid):
 # ---------------------------------------------------------------------------
 
 PAPER_GRANTS_TABLE = "papers_grants"
-# A grant in a PubMed GrantList: optional activity code (R01, K08, T32, or the
-# intramural ZIA), the institute, the serial: "K08-AI079381", "ZIA AI005081".
-ACKNOWLEDGED_GRANT_RE = re.compile(
-    r"(?<![A-Z0-9])(?:\d?([A-Z]\d{2}|Z[A-Z0-9]{2})[\s-]?)?([A-Z][A-Z1])\s?-?\s?(\d{5,6})(?!\d)")
-# Every NIH core project number in the graph, intramural (ZIA...) included.
-AWARD_SERIAL_RE = re.compile(r"^([A-Z]\d{2}|Z[A-Z0-9]{2})([A-Z]{2}\d{6})$")
 
 
 def build_paper_grant_links(conn, links, sid):
     """
     grant -cites-> paper, from the paper's own PubMed GrantList ("Supported by
-    NIAID R01 AI123456"), fetched with `filovirus fetch paper-grants`. The
+    NIAID R01 AI123456"), fetched with `filovirus fetch paper-details`. The
     same relation RePORTER's publication lists produce, reached from the
     paper's side: most duplicate a RePORTER link and only add a support row;
     the rest are papers RePORTER doesn't list.
@@ -1042,13 +1065,7 @@ def build_paper_grant_links(conn, links, sid):
         print("grant -> paper (PubMed grant lists): not fetched, skipped")
         return
     pub_ids = dict(conn.execute(text("SELECT pubmed_id, publication_id FROM core.publication")).fetchall())
-    by_core, by_serial = {}, {}
-    for award_id, core in conn.execute(text("SELECT grant_award_id, core_project_num FROM core.grant_award")):
-        m = AWARD_SERIAL_RE.match(core or "")
-        if m:
-            by_core.setdefault(core, set()).add(award_id)
-            by_serial.setdefault(m.group(2), set()).add(award_id)
-    contracts = contract_awards(conn)
+    grants = GrantNumbers(conn)
 
     existing = {(k[1], k[3]) for k in links.links if k[0] == "grant_award" and k[2] == "publication"}
     acknowledgements = linked = new = 0
@@ -1057,17 +1074,10 @@ def build_paper_grant_links(conn, links, sid):
         if publication_id is None:
             continue
         acknowledgements += 1
-        grant = r.grant_id.upper()
-        targets = set()
-        for m in ACKNOWLEDGED_GRANT_RE.finditer(grant):
-            institute = "AI" if m.group(2) == "A1" else m.group(2)
-            serial = institute + m.group(3).zfill(6)
-            exact = by_core.get(f"{m.group(1)}{serial}") if m.group(1) else None
-            targets |= exact or by_serial.get(serial, set())
-        if not targets and r.acronym and re.fullmatch(r"\d{5,6}", grant.strip()):
-            targets = by_serial.get(r.acronym.upper() + grant.strip().zfill(6), set())   # "AI" + "109762"
-        for m in CONTRACT_IN_TEXT_RE.finditer(grant):
-            targets |= contract_targets(m.group(1) or m.group(2), contracts)
+        grant_id = r.grant_id.strip()
+        if r.acronym and re.fullmatch(r"\d{5,6}", grant_id):
+            grant_id = r.acronym + grant_id           # GrantList gives "109762" + acronym "AI"
+        targets = set(grants.match(grant_id))
         for award_id in targets:
             new += (award_id, str(publication_id)) not in existing
             existing.add((award_id, str(publication_id)))
@@ -1076,6 +1086,24 @@ def build_paper_grant_links(conn, links, sid):
             linked += 1
     print(f"grant -> paper (PubMed grant lists): {acknowledgements} acknowledgements on graph papers; "
           f"{linked} matched a grant in the graph, {new} of them citations RePORTER doesn't list")
+
+
+def apply_paper_online_dates(conn):
+    """
+    core.publication.epub_date from `filovirus fetch paper-details`: when each
+    paper went online. core.v_document_date dates a paper by the earlier of
+    that and its issue year.
+    """
+    if not raw_table_exists("papers_dates"):
+        return
+    conn.execute(text("UPDATE core.publication SET epub_date = NULL"))
+    updated = conn.execute(text(
+        "UPDATE core.publication p SET epub_date = d.epub_date::date FROM raw.papers_dates d "
+        "WHERE p.pubmed_id = d.pmid AND d.epub_date ~ '^\\d{4}-\\d{2}-\\d{2}$'")).rowcount
+    earlier = conn.execute(text(
+        "SELECT count(*) FROM core.publication WHERE year ~ '^\\d{4}$' "
+        "AND epub_date < make_date(year::int, 1, 1)")).scalar()
+    print(f"core.publication: {updated} online dates; {earlier} papers went online before their issue year")
 
 
 # ---------------------------------------------------------------------------
@@ -1148,7 +1176,7 @@ def build_organizations(conn):
         ids[key] = conn.execute(text(
             "INSERT INTO core.organization (org_key, name, kind, spellings) VALUES (:k, :n, :kind, :s) "
             "RETURNING organization_id"),
-            {"k": key, "n": display_name(key, spellings[key]), "kind": kind_of(key),
+            {"k": key, "n": display_name(key, spellings[key]), "kind": kind_of(key, spellings[key]),
              "s": sorted(set(spellings[key]))}).scalar()
     for award_id, key in set(grant_rows):
         conn.execute(text("INSERT INTO core.grant_award_organization VALUES (:a, :o) ON CONFLICT DO NOTHING"),
@@ -1654,6 +1682,7 @@ def main():
         build_grant_publication_links(conn, links, award_ids, source_ids["nih_reporter"])
         build_grant_ack_links(conn, links, award_ids, source_ids["nih_reporter"])
         build_paper_grant_links(conn, links, source_ids["pubmed"])
+        apply_paper_online_dates(conn)
         build_patent_publication_links(conn, links, patent_ids, source_ids["uspto"])
         build_document_citations(conn, links, patent_ids, source_ids)
         build_grant_patent_links(conn, links, patent_ids, source_ids["nih_reporter"])

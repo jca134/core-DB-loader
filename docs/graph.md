@@ -44,7 +44,9 @@ password anywhere the database is reachable by anyone else.
   `(:Patent)-[:ASSIGNED_TO {role}]->`.
 - **Dates.** Every `Grant`, `Patent` and `Publication` has `date` (when it
   became public, from `core.v_document_date`), `date_precision`
-  (`day` / `fiscal_year` / `year`) and `date_basis`.
+  (`day` / `fiscal_year` / `year`) and `date_basis`. A paper is dated by the
+  earlier of its online date and its print issue year (`date_basis` `online`
+  or `issue_year`): journals often publish online first, sometimes years first.
 - **Left out:** raw sequence strings and the lineage tables stay in Postgres.
 
 The export compares every node and relationship count with the Postgres rows

@@ -16,6 +16,7 @@ two correct builds are replaced by natural keys first:
   source_id        -> source_code   (a fresh database numbers sources 1..n;
                                      an old one has gaps from years of upserts)
   publication_id   -> pubmed_id     (papers get ids in upsert order)
+  organization_id  -> org_key       (numbered in name order: one change renumbers the rest)
   a polymorphic reference to a publication -- evidence_link, xref and
   provenance rows whose entity type is 'publication' -- the same way
   evidence_link_id -> the link itself (evidence/entity/relation), in support
@@ -69,6 +70,11 @@ class Snapshot:
             self.sources = dict(conn.execute(text("SELECT source_id, source_code FROM core.source")).fetchall())
             self.pmids = {str(k): v for k, v in conn.execute(
                 text("SELECT publication_id, pubmed_id FROM core.publication")).fetchall()}
+            # Organizations are numbered in name order, so one added or removed
+            # renumbers the rest: compare them by their normalized key.
+            self.orgs = {}
+            if conn.execute(text("SELECT to_regclass('core.organization')")).scalar():
+                self.orgs = dict(conn.execute(text("SELECT organization_id, org_key FROM core.organization")).fetchall())
             self.tables = [r[0] for r in conn.execute(text(
                 "SELECT table_name FROM information_schema.tables "
                 "WHERE table_schema = 'core' AND table_type = 'BASE TABLE' ORDER BY 1"))]
@@ -101,6 +107,8 @@ class Snapshot:
                     row["source_id"] = self.sources.get(row["source_id"], row["source_id"])
                 if "publication_id" in row:
                     row["publication_id"] = ("pmid", self.pmids.get(str(row["publication_id"])))
+                if "organization_id" in row:
+                    row["organization_id"] = ("org", self.orgs.get(row["organization_id"]))
                 if table == "evidence_link_support":
                     row["evidence_link_id"] = self.links.get(row["evidence_link_id"])
                 out[tuple(sorted((k, repr(v)) for k, v in row.items() if k not in drop))] += 1

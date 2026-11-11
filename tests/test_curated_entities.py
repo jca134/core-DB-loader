@@ -66,3 +66,20 @@ def test_link_keys_use_natural_ids_and_skip_unknown_rows():
     ids = {"grant_award": {"7": "R01AI123456"}, "gene": {"3": "GP"}}
     assert link_key(ids, "grant_award", 7, "gene", "3", "related") == "grant_award:R01AI123456|gene:GP|related"
     assert link_key(ids, "grant_award", 8, "gene", "3", "related") is None
+
+
+def test_organization_kinds_cover_nih_institutes_states_and_suffixed_companies():
+    assert kind_of(normalize("NATIONAL EYE INSTITUTE")) == "government"
+    assert kind_of(normalize("EUNICE KENNEDY SHRIVER NATIONAL INSTITUTE OF CHILD HEALTH & HUMAN DEVELOPMENT")) == "government"
+    assert kind_of(normalize("NATIONAL CENTER FOR ADVANCING TRANSLATIONAL SCIENCES")) == "government"
+    assert kind_of(normalize("DELAWARE DIVISION OF PUBLIC HEALTH")) == "government"
+    assert kind_of(normalize("WISTAR INSTITUTE OF ANATOMY AND BIOLOGY")) == "nonprofit"
+    assert kind_of(normalize("Bavarian Nordic A/S"), ["Bavarian Nordic A/S"]) == "company"
+    assert kind_of(normalize("Dana-Farber Cancer Institute, Inc."), ["Dana-Farber Cancer Institute, Inc."]) == "nonprofit"
+    assert kind_of(normalize("HARVARD MEDICAL SCHOOL")) == "university"
+
+
+def test_address_fragments_are_not_organizations():
+    field = "The Government of the United States as represented by the Secretary of the Army, Ft Detrick,Md,Humabs BioMed SA"
+    names = split_names(field)
+    assert "Md" not in names and "Humabs BioMed SA" in names
