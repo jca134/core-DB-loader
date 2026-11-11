@@ -1,322 +1,141 @@
-# core-data-loader
+# Filovirus knowledge graph
 
-Loads filovirus (Ebola/Marburg) data from BV-BRC, HFV/LANL, ImmPort, NCBI, and
-UCSC into a Postgres database, then transforms it from `raw.*` mirrors into a
-shared `core.*` schema. An evidence layer adds NIH grants, USPTO patents, and
-research papers, each linked to the entities already in the graph.
+Builds a knowledge graph of Ebola and Marburg viruses, and lets you query it.
+It combines:
+- genomes, proteins, structures, epitopes and antibodies from BV-BRC, NCBI,
+  LANL and UCSC
+- clinical studies from ImmPort
+- the NIH grants, USPTO patents and papers about them, linked to everything
+  above
 
-The database is the domain knowledge graph for the **SerenQA** serendipity-aware
-KGQA algorithm — see `overview/README.md` for the full project orientation,
-including which schema decisions that algorithm drives.
+It is the domain knowledge graph for **SerenQA**, a serendipity-aware
+question-answering algorithm. That is why links are explicit, typed and carry
+a confidence score.
 
-## Quick start: query the graph
-
-Assumes the database is already built and Neo4j is installed (one-time setup
-is under [Graph database (Neo4j)](#graph-database-neo4j)).
-
-```bash
-# 1. Make sure Neo4j is running
-brew services start neo4j
-
-# 2. Refresh the graph from Postgres (after any data change; ~20 s)
-uv run python -m core_data_loader.export.export_neo4j
-
-# 3. Open the query page -> http://localhost:8765
-uv run python -m core_data_loader.query.ask_graph --serve
+```
+data/ ──load──▶ Postgres raw.* ──build──▶ Postgres core.* ──export──▶ Neo4j ──serve──▶ query page
+  ▲                                            │
+  └── fetch (network lookups, run once)        └── check (data-quality checks)
 ```
 
-The page has two parts:
+Everything runs through one command, `filovirus`. Postgres is the source of
+truth, and Neo4j is a read-only copy for graph queries.
 
-- **Pick a question (free).** Ready-made questions with dropdowns ("Which
-  antibodies target [GP]?", "Which NIH grants study [Marburg viruses]?", ...).
-  Each one is a fixed, checked Cypher query. No key or account needed. Results
-  download as CSV.
-- **Ask in your own words (optional, uses AI).** Paste an Anthropic API key
-  into the page once; it is checked, then saved in your home folder
-  (`~/.config/filovirus-graph/`), never in the repo. Each question costs a few
-  cents. Get a key at <https://console.anthropic.com/settings/keys>.
+## Query the graph
 
-| What | Where |
-| --- | --- |
-| Query page | <http://localhost:8765> (while `--serve` is running) |
-| Neo4j Browser (write Cypher yourself) | <http://localhost:7474>, user `neo4j`, password `filovirus` |
-| Stop Neo4j | `brew services stop neo4j` |
-
-## Prerequisites
-
-- **Python 3.11+**
-- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — manages
-  the virtual environment and dependencies for this project
-- **PostgreSQL** — running locally, or reachable over the network
-
-## Setup
-
-1. Install dependencies (uv creates `.venv` and installs everything from
-   `pyproject.toml`/`uv.lock` automatically):
-
-   ```bash
-   uv sync
-   ```
-
-2. Create the database and its schemas/tables:
-
-   ```bash
-   createdb filovirus
-   psql -d filovirus -f sql/01_schemas.sql -f sql/02_core.sql \
-                     -f sql/03_ops.sql \
-                     -f sql/04_evidence.sql \
-                     -f sql/05_clinical_vocab.sql
-   ```
-
-3. Point the scripts at your database. By default they connect to
-   `postgresql+psycopg2://$(whoami)@localhost:5432/filovirus`. If your setup
-   differs (different user, password, host, or database name), set:
-
-   ```bash
-   export FILOVIRUS_DB_URL="postgresql+psycopg2://user:password@host:5432/filovirus"
-   ```
-
-4. Add source data. `data/` is git-ignored, so you'll need to place the raw
-   downloads yourself, one subfolder per source. Put the data folder under the project root:
-
-   ```
-   data/bvbrc/     data/hfv/     data/immport/     data/ncbi/     data/ucsc/
-   data/grants/    data/patents/ data/papers/
-   ```
-
-   The papers bundle ships as a zip; unzip it in place:
-
-   ```bash
-   cd data/papers && unzip 'papers_iedb_rcsb_update (1) (1).zip'
-   ```
-
-## Usage
-
-Run the loaders you need (each mirrors its source files verbatim into
-`raw.*`, replacing the table if it already exists):
+If everything is already set up:
 
 ```bash
-uv run python -m core_data_loader.loaders.load_bvbrc
-uv run python -m core_data_loader.loaders.load_hfv
-uv run python -m core_data_loader.loaders.load_immport
-uv run python -m core_data_loader.loaders.load_ncbi
-uv run python -m core_data_loader.loaders.load_ucsc
-uv run python -m core_data_loader.loaders.load_grants
-uv run python -m core_data_loader.loaders.load_patents
-uv run python -m core_data_loader.loaders.load_papers
+brew services start neo4j   # if it isn't running
+uv run filovirus serve      # then open http://localhost:8765
 ```
 
-Then populate `core.*` from `raw.*`. One command runs every ETL in the required
-order and verifies the result:
+- **Pick a question (free).** Ready-made questions with dropdowns, such as
+  "Which antibodies target [GP]?" or "Which NIH grants study [Marburg
+  viruses]?". Each runs a fixed, checked query and shows it. Results download
+  as CSV.
+- **Ask in your own words (optional).** Paste an Anthropic API key into the
+  page once and Claude answers any question, showing the queries it ran. Each
+  question costs a few cents. Get a key at
+  <https://console.anthropic.com/settings/keys>.
+
+To write Cypher yourself, use Neo4j Browser at <http://localhost:7474>
+(user `neo4j`, password `filovirus`).
+
+## First-time setup
+
+You need **Python 3.11+**, **[uv](https://docs.astral.sh/uv/)**, **PostgreSQL**
+and, for the graph, **Neo4j** (`brew install neo4j`).
 
 ```bash
-uv run python -m core_data_loader.etl.run_all
-```
+uv sync                                           # install dependencies and the `filovirus` command
+createdb filovirus
+uv run filovirus init-db                          # create the schemas and tables (safe to rerun)
 
-The order is a correctness requirement, not a convention — `etl_bvbrc_hfv`
-truncates `core.sequence`, which cascades into `core.gene`; `etl_immport`
-cascades into `core.taxon_condition`; `etl_evidence` resolves links to keys
-every earlier script regenerates. Getting it wrong raises nothing and leaves a
-database that looks fine. `run_all` also resynchronises the `BIGSERIAL`
-sequences afterwards and then runs `sql/checks.sql`, exiting non-zero if any
-check fails.
-
-To run the steps individually instead, use the order below.
-
-Then run the matching ETL script to populate `core.*` from `raw.*`. Run them
-in this order: `etl_bvbrc_hfv` rebuilds `core.sequence`, which empties
-`core.gene`/`core.gene_domain` (FK cascade), so `etl_ucsc` has to come after it.
-
-```bash
-uv run python -m core_data_loader.etl.etl_bvbrc_hfv
-uv run python -m core_data_loader.etl.etl_immport
-uv run python -m core_data_loader.etl.etl_ucsc
-```
-
-Then, once both `etl_bvbrc_hfv` and `etl_immport` have run, seed the curated
-taxon-to-disease mapping (`core.taxon_condition`, e.g. Zaire ebolavirus ->
-Ebola hemorrhagic fever):
-
-```bash
-uv run python -m core_data_loader.etl.etl_taxon_condition
-uv run python -m core_data_loader.etl.etl_antibody_target
-```
-
-`etl_antibody_target` fills `core.antibody_epitope.target_gene_symbol` from LANL's
-product label, which is what makes "which antibodies target GP" answerable —
-`protein_id` is null on every row, because a label like "glycoprotein" cannot
-identify one of the 32,004 accession-keyed `core.protein` rows.
-
-Finally, build the evidence layer — grants, patents, papers, and the links from
-each to entities already in `core.*`:
-
-```bash
-uv run python -m core_data_loader.etl.etl_evidence
-```
-
-**`etl_evidence` must run last, and must be rerun whenever any other ETL
-reruns.** It stores resolved primary keys, and most of those are surrogate keys
-that `etl_bvbrc_hfv` (epitope/structure/antibody), `etl_ucsc` (gene) and
-`etl_immport` (condition) regenerate on every run — the same standing
-requirement as `etl_taxon_condition`. The script ends with an orphan check;
-if it reports anything other than zero dangling rows, something upstream moved.
-
-Grant-to-paper edges need one extra, network-dependent step. It queries the NIH
-RePORTER publications API (free, no key) and writes a CSV that `load_grants`
-picks up automatically on later runs:
-
-```bash
-uv run python -m core_data_loader.loaders.fetch_grant_publications
-```
-
-That list cites ~20k papers, almost none of them in the papers bundle. A
-second fetch pulls their PubMed records (title, abstract, MeSH); `etl_evidence`
-then adds the filovirus ones (~1,270: a filovirus term in the title or MeSH,
-or twice in the abstract) to `core.publication`, so their citations become
-edges instead of being dropped. Run it after `fetch_grant_publications`:
-
-```bash
-uv run python -m core_data_loader.loaders.fetch_cited_publications
-```
-
-Patents and grants also take optional companion files from the patents and
-grants workstreams. Each is picked up if it exists and skipped if it doesn't:
-
-| File | What it adds |
-| --- | --- |
-| `data/patents/patent_evidence_expanded.csv` | 100 more patents from a broader USPTO abstract search (no publication date, CPC codes or page count) |
-| `data/patents/patent_entity_links.csv` | keyword hits in patent **abstracts**, re-resolved through the shared matcher |
-| `data/patents/patent_team_paper_edges.csv` | patent -> paper citations already resolved to PMIDs |
-| `data/patents/patent_external_literature_edges.csv` | patents' free-text references cited (input to the fetch below) |
-| `data/grants/grant_entity_edges.csv` | grant -> condition / symptom / assay-type hits, each re-checked against the stored grant text |
-| `data/grants/grant_paper_divergence.csv` | only its `pubmed_ack` rows are used: grant -> paper citations from the paper's PubMed grant list |
-
-Patents' references cited are free text, not PMIDs. This fetch resolves them
-against PubMed and verifies each match (title similarity, or author + year +
-volume + page). `etl_evidence` then adds every resolved paper to
-`core.publication` -- unlike grant-cited papers there is no filovirus filter,
-because a patent's short reference list is the prior art it builds on:
-
-```bash
-uv run python -m core_data_loader.loaders.fetch_patent_cited_publications
-```
-
-Papers need one too. PubMed supplies the titles and years the papers bundle
-doesn't carry; without it every paper node is labelled `PMID 28854372` and has
-no date, which keeps papers out of any temporal analysis:
-
-```bash
-uv run python -m core_data_loader.loaders.fetch_publication_metadata
-```
-
-Evidence links are not all equally strong. A link built from an exact
-identifier carries `confidence = 1.0`; one built from a keyword in a grant
-abstract or patent title carries less, and every link records the term and
-field that produced it in `core.evidence_link_support`.
-
-Documents link to each other directly in `core.evidence_link` (a grant citing a
-paper, for instance), not through a shared entity: pairing documents that
-mention the same taxon connected 87% of all grant/patent pairs and told you
-nothing.
-
-Symptoms and assay types are nodes too (`core.symptom`, `core.assay_type`),
-seeded from the curated lists in `common/clinical_vocab.py` with HPO / OBI ids,
-and linked to isolates, ImmPort experiments and epitope assays by
-`etl_clinical_vocab`. Outside this DB, refer to them by their HPO/OBI ids,
-not the surrogate ids.
-
-After any ETL run, verify the database with the data-quality checks. Every
-count the report prints should be 0:
-
-```bash
-psql -d filovirus -f sql/checks.sql
-```
-
-Mappings are made at species rank. To find the conditions for an isolate,
-epitope, or structure, join on the `core.taxon_condition_inherited` view,
-which carries each mapping down to every descendant taxon (strains, legacy
-species names, and so on).
-
-## Graph database (Neo4j)
-
-The same data can be queried as a graph in Neo4j, using Cypher -- the query
-language SerenQA's retrieval task generates. Postgres stays the source of
-truth: the export wipes Neo4j and rebuilds it from `core.*`, so rerun it after
-every `run_all`.
-
-One-time setup (macOS):
-
-```bash
-brew install neo4j
-neo4j-admin dbms set-initial-password filovirus   # before the first start
+neo4j-admin dbms set-initial-password filovirus   # once, before Neo4j's first start
 brew services start neo4j
 ```
 
-Then export:
+Put the source files under `data/`, one folder per source. Which files go
+where is in [docs/data-sources.md](docs/data-sources.md). Then build
+everything:
 
 ```bash
-uv run python -m core_data_loader.export.export_neo4j
+uv run filovirus rebuild    # load data/ -> build the database -> export to Neo4j  (~2 min)
 ```
 
-It fails if any node or relationship count differs from the Postgres rows it
-came from. Override the connection with `NEO4J_URI`, `NEO4J_USER` and
-`NEO4J_PASSWORD`.
+Settings come from environment variables. The defaults fit a local setup:
 
-Query it in Neo4j Browser at <http://localhost:7474> (user `neo4j`). Nodes are
-the core tables in CamelCase (`Taxon`, `Grant`, `Patent`, `Publication`, ...)
-keyed on the same primary keys; evidence links are `RELATED`, `CITES`,
-`CLAIMS` and `DESCRIBES` relationships carrying `confidence` and
-`matched_terms`. External ids are node properties (`xref_genbank_accession`,
-`xref_ncbi_protein_id`, ...).
+| Variable | Default |
+| --- | --- |
+| `FILOVIRUS_DB_URL` | `postgresql+psycopg2://$USER@localhost:5432/filovirus` |
+| `FILOVIRUS_DATA_DIR` | `./data` |
+| `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | `bolt://localhost:7687` / `neo4j` / `filovirus` |
+| `NCBI_EMAIL` | unset. The contact address sent with PubMed requests by `filovirus fetch` |
+| `ANTHROPIC_API_KEY` | unset. Optional; a key can also be pasted into the query page |
 
-```cypher
-// papers cited by both a patent and a grant
-MATCH (p:Patent)-[:CITES]->(paper:Publication)<-[:CITES]-(g:Grant)
-RETURN p, paper, g LIMIT 25
-```
+## Commands
 
-Raw sequence strings and lineage tables stay in Postgres only.
+Run them as `uv run filovirus ...`, or as plain `filovirus ...` once the
+virtualenv is activated.
 
-### The query page
+| Command | Does |
+| --- | --- |
+| `init-db` | create the Postgres schemas and tables; idempotent |
+| `load [SOURCE ...]` | source files in `data/` → `raw.*` (all sources by default) |
+| `fetch NAME ...` | NIH RePORTER / PubMed lookups that add CSVs to `data/`. Run once and keep the files ([details](docs/data-sources.md#written-by-filovirus-fetch-network-free-no-key)) |
+| `build` | `raw.*` → `core.*` in the required order, then the data-quality checks |
+| `check` | only the data-quality checks; every failure count should be 0 |
+| `export` | rebuild the Neo4j graph from `core.*` |
+| `serve` | the query page at <http://localhost:8765> |
+| `ask "QUESTION"` | one plain-English question in the terminal (needs an API key) |
+| `rebuild` | `load` + `build` + `export`: the usual refresh after data changes |
 
-`uv run python -m core_data_loader.query.ask_graph --serve` serves
-<http://localhost:8765>, on this computer only.
+After changing anything in `data/`, run `filovirus rebuild`. The build order is
+load-bearing; [docs/pipeline.md](docs/pipeline.md) explains why.
 
-**Ready-made questions** (`core_data_loader/query/templates.py`) are free and
-need no key. Each is a reviewed Cypher query with dropdown blanks; the values
-go to Neo4j only as query parameters. Picking "Ebola viruses" or "Marburg
-viruses" searches both of NCBI's genus names (old and new), because the
-sources link to both. To add a question, append to `TEMPLATES`.
+## Documentation
 
-**Plain-English questions** use Claude: it turns a question into Cypher, runs
-it, and answers, showing every query it ran. Queries run in read-only
-transactions, so a bad query can't change the graph. A key comes from
-`ANTHROPIC_API_KEY` if set, otherwise from one saved through the page. The
-same works from the terminal:
+| | |
+| --- | --- |
+| [docs/data-sources.md](docs/data-sources.md) | which file goes where, required vs optional, and what each fetcher adds |
+| [docs/pipeline.md](docs/pipeline.md) | raw → core → Neo4j, the build order and why it matters, the checks, curated mappings, known data traps |
+| [docs/evidence-layer.md](docs/evidence-layer.md) | how grants, patents and papers link to the graph, confidence scores, what was deliberately left out |
+| [docs/graph.md](docs/graph.md) | the Neo4j model, the query page, adding ready-made questions, the API key and safety |
 
-```bash
-uv run python -m core_data_loader.query.ask_graph "Which antibodies target GP?"
-```
-
-`--show-schema` prints the graph description Claude is given. That
-description is generated from the live graph, so it stays current after every
-export.
+`overview/` (git-ignored, shared separately) holds the team's planning
+documents and the SerenQA paper.
 
 ## Project layout
 
-| Path | Purpose |
-| --- | --- |
-| `core_data_loader/common/db_utils.py` | DB engine + shared value-parsing helpers, no schema knowledge |
-| `core_data_loader/common/sources.py` | Catalog of external datasets; upserts `core.source` rows |
-| `core_data_loader/common/taxon_conditions.py` | Curated taxon-to-disease mappings; upserts `core.taxon_condition` rows |
-| `core_data_loader/common/antibody_targets.py` | Curated LANL-product-to-gene mappings; fills `antibody_epitope.target_gene_id` |
-| `core_data_loader/common/kg_keywords.py` | Shared KG search vocabulary + the text matcher behind keyword evidence links |
-| `core_data_loader/common/raw_common.py` | Shared helpers for `loaders/` (raw ingestion) |
-| `core_data_loader/common/etl_common.py` | Shared helpers for `etl/` (raw → core transforms) |
-| `core_data_loader/loaders/` | One script per source; loads raw files into `raw.<table>` |
-| `core_data_loader/etl/` | Transforms `raw.*` tables into `core.*` |
-| `core_data_loader/export/export_neo4j.py` | Rebuilds the Neo4j graph from `core.*` |
-| `core_data_loader/query/` | Query page (`web.py`), ready-made questions (`templates.py`), plain-English questions via Claude (`ask_graph.py`) |
-| `core_data_loader/profiling/profile_bvbrc.py` | Profiles `raw.bvbrc_*` columns, writes `profile/bvbrc_profile.csv` |
-| `sql/` | Schema DDL — run once against a fresh database |
-| `overview/` | Project orientation, the SerenQA paper, and team planning docs (git-ignored) |
+```
+core_data_loader/
+├── cli.py          the `filovirus` command
+├── config.py       every setting and path, from the environment
+├── common/         DB engine, value parsing, raw/ETL helpers, source catalog, keyword matcher
+├── curated/        hand-curated mappings: taxon→disease, antibody→gene, symptom/assay vocabularies
+├── loaders/        one per source: data/ → raw.*            (filovirus load)
+├── fetchers/       NIH RePORTER / PubMed lookups → data/     (filovirus fetch)
+├── etl/            raw.* → core.*, run in order by pipeline.py   (filovirus build)
+└── graph/          Neo4j export, query page, ready-made questions, Claude questions
+sql/                schema DDL (01–05) and the data-quality checks (checks.sql)
+tests/              unit tests: pure logic only, no database needed
+docs/               the documentation above
+```
+
+## Development
+
+```bash
+uv run pytest           # unit tests; no database needed
+uv run ruff check .     # lint
+uv run filovirus check  # data-quality checks against the live database
+```
+
+Before merging an ETL change, rebuild a throwaway copy of the database and
+compare it with the real one. Matching row counts alone have hidden real bugs
+here before.
+
+```bash
+createdb -T filovirus filovirus_test
+FILOVIRUS_DB_URL=postgresql+psycopg2://$USER@localhost:5432/filovirus_test uv run filovirus build
+```

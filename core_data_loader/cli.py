@@ -178,7 +178,35 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        return 130
+    except Exception as e:
+        hint = _setup_hint(e)
+        if hint is None:
+            raise
+        print(f"\nfilovirus {args.command}: {hint}", file=sys.stderr)
+        return 1
+
+
+def _setup_hint(e: Exception) -> str | None:
+    """A one-line fix for the setup problems people actually hit; None for real bugs."""
+    from neo4j.exceptions import AuthError, ServiceUnavailable
+    from sqlalchemy.exc import OperationalError, ProgrammingError
+
+    if isinstance(e, FileNotFoundError):
+        return f"{e}\n  Source files are described in docs/data-sources.md."
+    if isinstance(e, OperationalError):
+        return ("can't connect to Postgres. Is it running, and does the database exist "
+                "(`createdb filovirus`)? Set FILOVIRUS_DB_URL if yours differs.\n  " + str(e.orig).strip())
+    if isinstance(e, ProgrammingError) and "does not exist" in str(e.orig):
+        return f"{str(e.orig).strip()}\n  Run `filovirus init-db` (and `filovirus load` before `build`)."
+    if isinstance(e, ServiceUnavailable):
+        return "can't reach Neo4j. Start it with `brew services start neo4j` (see docs/graph.md)."
+    if isinstance(e, AuthError):
+        return "Neo4j rejected the login. Check NEO4J_USER / NEO4J_PASSWORD (see docs/graph.md)."
+    return None
 
 
 if __name__ == "__main__":
