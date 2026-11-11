@@ -132,7 +132,8 @@ def main():
         "study_accession": experiment["study_accession"],
         "measurement_technique": experiment["measurement_technique"],
         "name": experiment["name"],
-        "description": experiment["description"],
+        # ImmPort fills an empty description with the placeholder "n/a".
+        "description": experiment["description"].mask(experiment["description"].str.strip().str.lower() == "n/a"),
         "source_id": experiment["_source_id"],
     })
     write_core(core_experiment, "experiment")

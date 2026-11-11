@@ -1,6 +1,7 @@
 """The database engine and the value-parsing helpers every stage shares."""
 
 import hashlib
+import html
 import re
 from datetime import datetime
 
@@ -16,6 +17,52 @@ def blank_to_none(v):
         return None
     s = str(v).strip()
     return s if s else None
+
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_MOJIBAKE_RE = re.compile(r"Ã.|â€|Â")
+
+
+def _fix_mojibake(s: str) -> str:
+    """
+    Undo UTF-8 that was decoded as Latin-1/cp1252, possibly more than once:
+    'KÃ¼ttner' -> 'Küttner'. Each round is kept only if it decodes cleanly and
+    leaves fewer mojibake markers, so correct text is never touched.
+    """
+    for _ in range(3):
+        if not _MOJIBAKE_RE.search(s):
+            break
+        for codec in ("cp1252", "latin-1"):
+            try:
+                fixed = s.encode(codec).decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                continue
+            if len(_MOJIBAKE_RE.findall(fixed)) < len(_MOJIBAKE_RE.findall(s)):
+                s = fixed
+                break
+        else:
+            break
+    return s
+
+
+def clean_text(v):
+    """
+    Free text from a source, as it should be stored: HTML entities decoded
+    (RePORTER abstracts carry '&#946;' for 'β'), control characters removed,
+    double-decoded UTF-8 repaired, blank -> None. Use it for titles, abstracts
+    and citation strings -- anything a reader or the keyword matcher sees.
+    """
+    s = blank_to_none(v)
+    if s is None:
+        return None
+    if "&" in s:
+        s = html.unescape(s)
+    # \x13 / \x14 are an en / em dash (U+2013 / U+2014) that lost its high
+    # byte on the way: "residues 524 \x13 539". Restore those; any other
+    # control character becomes a space.
+    s = _CONTROL_CHARS_RE.sub(" ", s.replace("\x13", "\u2013").replace("\x14", "\u2014"))
+    s = _fix_mojibake(s)
+    return blank_to_none(s)
 
 
 def safe_int(v):

@@ -203,7 +203,7 @@ ALTER TABLE core.evidence_link ADD CONSTRAINT evidence_link_entity_type_check CH
     'taxon', 'gene', 'protein', 'epitope', 'antibody', 'condition',
     'structure', 'isolate', 'sequence', 'feature', 'study',
     'publication', 'grant_award', 'patent',
-    'symptom', 'assay_type'
+    'symptom', 'assay_type', 'countermeasure'
 ));
 
 -- Now that a document can be a target, it could be its own target. A paper

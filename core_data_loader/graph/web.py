@@ -20,7 +20,7 @@ from pathlib import Path
 import anthropic
 from neo4j.exceptions import Neo4jError
 
-from core_data_loader.graph import api_key
+from core_data_loader.graph import api_key, review
 from core_data_loader.graph.ask import GUIDE, MODEL, Graph, ask
 from core_data_loader.graph.templates import (
     OPTION_QUERIES,
@@ -111,6 +111,24 @@ class QueryApp:
             self.key_source = "this session"
         return self.status()
 
+    # --- link review (graph/review.py) --------------------------------------------
+
+    def review_next(self, body):
+        tier = body.get("tier")
+        link = review.next_link(float(tier) if tier not in (None, "") else None)
+        return link or {"done": True}
+
+    def review_record(self, body):
+        try:
+            review.record(body.get("link_key", ""), body.get("decision", ""), float(body.get("confidence", 0)),
+                          (body.get("note") or "").strip() or None)
+        except ValueError as e:
+            return {"error": str(e)}
+        return {"stats": review.stats()}
+
+    def review_stats(self, _body=None):
+        return {"stats": review.stats()}
+
     def forget_key(self, _body=None):
         api_key.forget_key()
         key, source = api_key.current_key()        # the environment variable may still be set
@@ -126,6 +144,8 @@ def make_handler(app: QueryApp, port: int):
     post_routes = {
         "/api/template": app.run_template, "/api/ask": app.ask,
         "/api/key": app.set_key, "/api/key/forget": app.forget_key,
+        "/api/review/next": app.review_next, "/api/review": app.review_record,
+        "/api/review/stats": app.review_stats,
     }
 
     class Handler(BaseHTTPRequestHandler):

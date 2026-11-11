@@ -103,5 +103,23 @@ def test_patent_page_metadata_is_read_from_tags_not_layout():
     assert parse_page(page) == {
         "publication_date": "2018-02-01", "filing_date": "2016-02-19", "priority_date": "2015-02-19",
         "abstract": "An antibody that binds a filovirus & neutralizes it.",
+        "cited_patents": "", "cited_by_patents": "", "government_interest": "",
     }
     assert compact_number("US 20180030118 A1") == "US20180030118A1"
+
+
+def test_patent_citations_are_read_from_the_citation_tables_only():
+    from core_data_loader.fetchers.patent_details import parse_page
+    row = lambda prop, number, date: (
+        f'<tr itemprop="{prop}" itemscope repeat><td><a href="/patent/{number}/en">'
+        f'<span itemprop="publicationNumber">{number}</span></a></td>'
+        f'<td><time itemprop="publicationDate" datetime="{date}"></time></td></tr>')
+    page = ("<time itemprop=\"publicationDate\" datetime=\"2016-12-27\">"
+            + row("backwardReferencesOrig", "US8101739B2", "2012-01-24")
+            + row("backwardReferences", "WO2006133911A2", "2006-12-14")
+            + row("backwardReferencesFamily", "US7000000B1", "2006-01-01")   # family-level: ignored
+            + row("forwardReferencesOrig", "US10561721B2", "2020-02-18"))
+    out = parse_page(page)
+    assert out["cited_patents"] == "US8101739B2;WO2006133911A2"
+    assert out["cited_by_patents"] == "US10561721B2"
+    assert out["publication_date"] == "2016-12-27"   # not a cited patent's date

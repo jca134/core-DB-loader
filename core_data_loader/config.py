@@ -42,6 +42,10 @@ SCHEMA_FILES = [
     "04_evidence.sql",
     "05_clinical_vocab.sql",
     "06_gene_family.sql",
+    "07_countermeasures.sql",
+    "08_organizations.sql",
+    "09_document_dates.sql",
+    "10_link_review.sql",
 ]
 CHECKS_SQL = SQL_DIR / "checks.sql"
 

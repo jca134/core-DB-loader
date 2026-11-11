@@ -10,6 +10,8 @@ to the entities it is about, in one polymorphic table: `core.evidence_link`
 | `claims` | patent → gene | a gene product named in the patent title |
 | `describes` / `related` | paper → epitope, structure, antibody, feature, isolate, study | the papers bundle's exact source identifiers |
 | `cites` | grant / patent → paper | NIH RePORTER and PubMed grant acknowledgements; patents' resolved references |
+| `funds` | grant → patent | the patent's statement of government interest ("made with government support under AI066487"), matched to the grant's institute + serial or contract number |
+| `related` | grant / patent / paper → countermeasure | the document's title or abstract naming a curated countermeasure (`curated/countermeasures.py`) |
 
 ## Confidence
 
@@ -30,9 +32,41 @@ organism-context rule in `organism_context_established`.
 
 ## Documents link directly
 
-Documents link to each other with direct `cites` edges, not through a shared
-entity. Pairing every two documents that mention the same taxon connected 87%
-of all grant/patent pairs and told you nothing.
+Documents link to each other with direct edges, not through a shared entity.
+Pairing every two documents that mention the same taxon connected 87% of all
+grant/patent pairs and told you nothing.
+
+| Edge | Source | Kept when |
+| --- | --- | --- |
+| grant `cites` paper | NIH RePORTER publication lists; PubMed grant acknowledgements | the paper is in `core.publication` |
+| patent `cites` paper | the patent's references cited, resolved on PubMed | always (all resolved papers are kept) |
+| paper `cites` paper | the citing paper's PubMed reference list (`fetch paper-citations`); only papers with full text in PubMed Central have one | both papers are in `core.publication` |
+| patent `cites` patent | the Google Patents citation tables, read from both ends: A's "cites" and B's "cited by" (`fetch patent-details`) | both patents are in `core.patent` |
+| patent `related` patent | the same patent family: an application points at the patent later granted for it | both are in `core.patent` |
+| grant `cites` grant | the grant's own title or abstract naming another grant's core project number | that number names exactly one award |
+
+No edge is guessed: if a reference's target is not in the graph, it is
+dropped.
+
+## Organizations
+
+Grant recipients and patent owners are `core.organization` nodes, joined to
+their documents by `grant_award_organization` and `patent_organization`
+(assignee or applicant). One organization merges every spelling of its name
+(`curated/organizations.py`), so "The United States of America as represented
+by the Secretary of the Army" and "US ARMY MEDICAL RESEARCH AND MATERIEL
+COMMAND" are one node. People listed as patent applicants are not
+organizations and are skipped.
+
+## Reviewing links
+
+The query page's **Review links** tab shows one keyword-based grant or patent
+link at a time, with the text that produced it, to mark right or wrong.
+Reviews live in `ops.link_review`, keyed by what the link connects in natural
+ids (`grant_award:R01AI123456|gene:GP|related`), so they survive rebuilds;
+`etl/evidence.py` copies each decision onto the rebuilt link's
+`review_status`. `filovirus review-stats` reports precision per confidence
+level.
 
 ## Papers
 

@@ -19,7 +19,7 @@ data/ ──load──▶ raw.*  ──build──▶ core.*  ──export──
 
 ## Schema
 
-`filovirus init-db` applies `sql/01_schemas.sql` … `06_gene_family.sql` in
+`filovirus init-db` applies `sql/01_schemas.sql` … `10_link_review.sql` in
 order. Every file is idempotent, so it is safe to run again after pulling a
 schema change.
 
@@ -35,10 +35,11 @@ database that looks fine and is quietly wrong.
 | 2 | `etl/immport.py` | studies, subjects, biosamples, experiments, conditions | -- |
 | 3 | `etl/ucsc.py` | the reference gene model (`core.gene`, `core.gene_domain`) | 1, which truncates `core.sequence` and cascades `core.gene` away |
 | 4 | `etl/gene_family.py` | filovirus gene families; assigns every gene and protein to one | 1 and 3, which rebuild `core.protein` and `core.gene` |
-| 5 | `etl/taxon_condition.py` | curated taxon → disease (`core.taxon_condition`) | 2, which truncates `core.condition` and cascades it away |
-| 6 | `etl/antibody_target.py` | curated antibody → gene symbol | 1, which rebuilds `core.antibody_epitope` |
-| 7 | `etl/clinical_vocab.py` | symptom and assay-type nodes and their links | 1 and 2, which cascade its link tables away |
-| 8 | `etl/evidence.py` | grants, patents, papers, and every evidence link | everything: it stores surrogate keys the other steps regenerate |
+| 5 | `etl/countermeasure.py` | curated countermeasures and their links to taxa, gene families, antibodies and studies | 1, 2 and 4 |
+| 6 | `etl/taxon_condition.py` | curated taxon → disease (`core.taxon_condition`) | 2, which truncates `core.condition` and cascades it away |
+| 7 | `etl/antibody_target.py` | curated antibody → gene symbol | 1, which rebuilds `core.antibody_epitope` |
+| 8 | `etl/clinical_vocab.py` | symptom and assay-type nodes and their links | 1 and 2, which cascade its link tables away |
+| 9 | `etl/evidence.py` | grants, patents, papers, organizations, and every evidence link; re-applies saved link reviews | everything: it stores surrogate keys the other steps regenerate |
 
 Run a single step with `python -m core_data_loader.etl.<step>`, then **always
 rerun `etl.evidence` afterwards**. It stores resolved primary keys for genes,
@@ -66,6 +67,8 @@ and reviewed like code:
 | `taxon_conditions.py` | species-rank taxon → disease (DOID), plus `CURATED_CONDITIONS`, which seeds filovirus diseases that ImmPort doesn't supply (Marburg). Query through the `core.taxon_condition_inherited` view, which carries each mapping down to every strain |
 | `antibody_targets.py` | LANL antibody product label → gene symbol, which is what makes "which antibodies target GP" answerable |
 | `gene_families.py` | the seven filovirus gene families (NP, VP35, VP40, GP, VP30, VP24, L) and the names that map a protein onto one, from its gene label or else its product name. `core.gene` is Ebola's reference model only; the family is the virus-neutral bridge, so a Marburg GP protein is linked to "GP" without being called an Ebola gene |
+| `countermeasures.py` | 14 vaccines, antibody products and antivirals: licensed (Ervebo, Zabdeno/Mvabea, Inmazeb, Ebanga) and clinical-stage (ZMapp, remdesivir, ...), with the taxa and gene family they act on, component antibodies, the ImmPort trial, and the names documents use for them |
+| `organizations.py` | how grant recipients' and patent owners' names are merged into one organization: normalization rules (case, punctuation, legal suffixes and preambles, RePORTER abbreviations), rules for the US government's many spellings, and a short alias list |
 | `clinical_vocab.py` | the symptom (HPO) and assay-type (OBI) vocabularies and their synonyms. Outside this database, refer to these nodes by their HPO/OBI ids, never the surrogate ids |
 
 ## Known data traps
@@ -79,6 +82,18 @@ These are written down because each one once cost a silent row loss:
   Orthoebolavirus, and Marburgvirus became Orthomarburgvirus. Sources link to
   both names, so anything that filters by taxon must walk `CHILD_OF` from
   both roots.
+- **Predicted structures.** 76 of the 255 `core.structure` rows are BV-BRC's
+  computed models (`method = 'Predicted'`), not RCSB entries. Their `pdb_id`
+  holds the BV-BRC model id (`fig|11269.341.CDS.6.pdb`), so filter on
+  `method <> 'Predicted'` when you mean real PDB structures.
+- **$0 grants.** NIH intramural projects (activity code ZIA) are reported by
+  RePORTER with an award amount of 0; 5 awards total $0 for that reason. That
+  is the source's figure, not a load error.
+- **Text that arrives damaged.** RePORTER abstracts carry HTML entities
+  (`&#946;` for β), a few carry a truncated en dash (`\x13`), and some patent
+  citation strings were double-decoded upstream (`KÃ¼ttner`). `clean_text`
+  in `common/db_utils.py` repairs what is recoverable on the way in; two
+  citation strings lost bytes before they reached us and stay as they are.
 - **Row counts.** A matching count proves nothing on its own. When changing
   the ETL, build a copy with the change and compare its contents with the
   current database (`filovirus compare`, below).

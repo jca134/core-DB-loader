@@ -52,3 +52,12 @@ def test_safe_date_still_parses_the_zoned_variants():
 
 def test_safe_year_reads_unzoned_iso_timestamps_too():
     assert safe_year("2008-09-26T00:00:00") == 2008
+
+
+def test_clean_text_repairs_source_text_without_touching_good_text():
+    from core_data_loader.common.db_utils import clean_text
+    assert clean_text("Changes in &#946;-cells &gt; 3") == "Changes in β-cells > 3"
+    assert clean_text("residues 524 \x13 539") == "residues 524 – 539"
+    assert clean_text("KÃ¼ttner G, HÃ¶hne W") == "Küttner G, Höhne W"
+    assert clean_text("naïve Müller — fine") == "naïve Müller — fine"
+    assert clean_text("   ") is None and clean_text(None) is None

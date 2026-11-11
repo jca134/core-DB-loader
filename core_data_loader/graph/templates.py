@@ -36,6 +36,7 @@ VIRUS_IDS = {key: ids for key, _label, ids in VIRUSES}
 OPTION_QUERIES = {
     "gene": "MATCH (g:Gene) RETURN g.gene_symbol AS value, g.gene_symbol AS label ORDER BY label",
     "gene_family": "MATCH (f:GeneFamily) RETURN f.symbol AS value, f.name AS label ORDER BY f.gene_family_id",
+    "countermeasure": "MATCH (c:Countermeasure) RETURN c.countermeasure_id AS value, c.name AS label ORDER BY label",
     # Ontology-backed only: ImmPort also files a vaccine trial name as a "condition".
     "condition": "MATCH (c:Condition) WHERE c.ontology_id IS NOT NULL "
                  "RETURN c.condition_id AS value, c.name AS label ORDER BY label",
@@ -102,6 +103,75 @@ ORDER BY Disease""",
 RETURN coalesce(i.country, '(not recorded)') AS Country, count(*) AS Isolates,
        min(i.collection_year) AS `First year`, max(i.collection_year) AS `Last year`
 ORDER BY Isolates DESC""",
+    },
+    {
+        "id": "countermeasures_for_virus", "group": "Viruses",
+        "question": "Which vaccines, antibodies and antivirals act against {virus}?",
+        "params": [{"name": "virus", "type": "virus"}],
+        "cypher": _SUBTREE + """MATCH (c:Countermeasure)-[:TARGETS]->(t) WHERE t IN taxa
+WITH DISTINCT c
+OPTIONAL MATCH (d)-[:RELATED]->(c)
+RETURN c.name AS Countermeasure, c.kind AS Kind, c.status AS Status, c.regulatory AS Approved,
+       c.developer AS Developer, count(DISTINCT d) AS `Grants, patents & papers naming it`
+ORDER BY CASE c.status WHEN 'licensed' THEN 0 WHEN 'clinical' THEN 1 ELSE 2 END, Countermeasure""",
+    },
+    # --- countermeasures ---------------------------------------------------------
+    {
+        "id": "documents_for_countermeasure", "group": "Countermeasures and organizations",
+        "question": "Which grants, patents and papers name {countermeasure}?",
+        "params": [{"name": "countermeasure", "type": "countermeasure"}],
+        "cypher": """MATCH (c:Countermeasure {countermeasure_id: $countermeasure})<-[r:RELATED]-(d)
+RETURN CASE WHEN d:Grant THEN 'Grant' WHEN d:Patent THEN 'Patent' ELSE 'Paper' END AS Type,
+       coalesce(d.project_title, d.title) AS Title, d.date AS Date, r.matched_terms AS `Named as`,
+       CASE WHEN d:Patent THEN 'https://patents.google.com/patent/' + replace(d.document_id, ' ', '')
+            WHEN d:Publication THEN d.url END AS Link
+ORDER BY Date DESC LIMIT 200""",
+    },
+    {
+        "id": "countermeasure_lineage", "group": "Countermeasures and organizations",
+        "question": "What antibodies, trials and gene targets is each countermeasure built on?",
+        "params": [],
+        "cypher": """MATCH (c:Countermeasure)
+OPTIONAL MATCH (c)-[:ACTS_ON]->(f:GeneFamily)
+OPTIONAL MATCH (c)-[:CONTAINS]->(a:Antibody)
+OPTIONAL MATCH (c)-[:TESTED_IN]->(s:Study)
+RETURN c.name AS Countermeasure, c.status AS Status, f.symbol AS `Acts on`,
+       collect(DISTINCT a.name) AS `Component antibodies`, collect(DISTINCT s.study_accession) AS `ImmPort trials`
+ORDER BY Countermeasure""",
+    },
+    {
+        "id": "grants_that_led_to_patents", "group": "Countermeasures and organizations",
+        "question": "Which NIH grants are credited on patents (the patent's government-interest statement)?",
+        "params": [],
+        "cypher": """MATCH (g:Grant)-[:FUNDS]->(p:Patent)
+RETURN g.project_title AS Grant, g.core_project_num AS `Grant number`, p.title AS Patent,
+       p.document_id AS `Patent number`, 'https://patents.google.com/patent/' + replace(p.document_id, ' ', '') AS Link
+ORDER BY `Grant number`""",
+    },
+    {
+        "id": "organizations_with_grants_and_patents", "group": "Countermeasures and organizations",
+        "question": "Which organizations both received NIH grants and own patents?",
+        "params": [],
+        "cypher": """MATCH (o:Organization)<-[:AWARDED_TO]-(g:Grant)
+WITH o, count(DISTINCT g) AS grants
+MATCH (o)<-[:ASSIGNED_TO]-(p:Patent)
+RETURN o.name AS Organization, o.kind AS Kind, grants AS Grants, count(DISTINCT p) AS Patents
+ORDER BY Patents DESC, Grants DESC""",
+    },
+    {
+        "id": "organization_portfolio", "group": "Countermeasures and organizations",
+        "question": "What grants and patents does an organization named {text} hold?",
+        "params": [{"name": "text", "type": "text"}],
+        "cypher": f"""MATCH (o:Organization) WHERE toLower(o.name) CONTAINS toLower($text)
+   OR any(s IN o.spellings WHERE toLower(s) CONTAINS toLower($text))
+CALL (o) {{
+  MATCH (o)<-[:AWARDED_TO]-(g:Grant)
+  RETURN 'Grant' AS Type, g.project_title AS Title, g.date AS Date, null AS Link
+  UNION ALL
+  MATCH (o)<-[:ASSIGNED_TO]-(p:Patent)
+  RETURN 'Patent' AS Type, p.title AS Title, p.date AS Date, {_PATENT_LINK} AS Link
+}}
+RETURN o.name AS Organization, Type, Title, Date, Link ORDER BY Organization, Date DESC LIMIT 200""",
     },
     # --- by gene --------------------------------------------------------------
     {
@@ -224,6 +294,28 @@ ORDER BY Year""",
 RETURN pub.title AS Paper, pub.year AS Year,
        collect(DISTINCT p.document_id) AS Patents, count(DISTINCT g) AS Grants, pub.url AS Link
 ORDER BY Grants DESC""",
+    },
+    {
+        "id": "most_cited_papers", "group": "Connections",
+        "question": "Which papers are cited most by other papers, grants and patents in the graph?",
+        "params": [],
+        "cypher": """MATCH (pub:Publication)<-[:CITES]-(d)
+WITH pub, count(DISTINCT CASE WHEN d:Publication THEN d END) AS papers,
+     count(DISTINCT CASE WHEN d:Grant THEN d END) AS grants,
+     count(DISTINCT CASE WHEN d:Patent THEN d END) AS patents
+RETURN pub.title AS Paper, pub.year AS Year, papers AS `Cited by papers`, grants AS `Cited by grants`,
+       patents AS `Cited by patents`, pub.url AS Link
+ORDER BY papers + grants + patents DESC LIMIT 100""",
+    },
+    {
+        "id": "patent_citation_pairs", "group": "Connections",
+        "question": "Which patents cite, or share a family with, other patents in the graph?",
+        "params": [],
+        "cypher": """MATCH (a:Patent)-[r:CITES|RELATED]->(b:Patent)
+RETURN a.title AS Patent, a.document_id AS Number, CASE type(r) WHEN 'CITES' THEN 'cites' ELSE 'same family as' END AS Relation,
+       b.title AS `Other patent`, b.document_id AS `Other number`,
+       'https://patents.google.com/patent/' + replace(a.document_id, ' ', '') AS Link
+ORDER BY Relation, Number""",
     },
     {
         "id": "top_genes_by_grants", "group": "Connections",

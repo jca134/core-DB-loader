@@ -285,3 +285,22 @@ def test_plural_and_adjectival_filovirus_forms_are_listed_separately():
     # "filoviruses"; each surface form needs its own entry.
     terms = {t for t, _, _, _ in SUPPLEMENTAL_TERMS}
     assert {"filovirus", "filoviruses", "filoviral"} <= terms
+
+
+def test_core_project_number_pattern_finds_grant_numbers_in_text():
+    from core_data_loader.etl.evidence import CORE_PROJECT_RE
+    text = "Builds on U01AI151801 and the U19 AI109762 center; not 1U01AI151801-01A1 style text."
+    found = ["".join(m.groups()) for m in CORE_PROJECT_RE.finditer(text)]
+    assert found[:2] == ["U01AI151801", "U19AI109762"]
+
+
+def test_grant_numbers_are_found_in_government_interest_statements():
+    from core_data_loader.etl.evidence import CONTRACT_IN_TEXT_RE, GRANT_IN_TEXT_RE
+    s = ("This invention was made with government support under R43 AI066487-01, U19AI109762 and "
+         "contract HHSN272201400058C awarded by the NIH, and W31P4Q-15-1-0003 awarded by DARPA.")
+    from core_data_loader.etl.evidence import grant_serial
+    grants = {grant_serial(m) for m in GRANT_IN_TEXT_RE.finditer(s)}
+    assert {"AI066487", "AI109762"} <= grants
+    older = "under NIH Grant Nos. AI 51292 and Grant A1057153 from the NIH"
+    assert {grant_serial(m) for m in GRANT_IN_TEXT_RE.finditer(older)} == {"AI051292", "AI057153"}
+    assert [m.group(1) for m in CONTRACT_IN_TEXT_RE.finditer(s)] == ["272201400058"]

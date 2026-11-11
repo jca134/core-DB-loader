@@ -49,6 +49,28 @@ def efetch_xml(pmids: list[str]) -> bytes:
     return _post("efetch.fcgi", 120, retmode="xml", id=",".join(pmids))
 
 
+def reference_lists(pmids: list[str]) -> dict[str, list[str]]:
+    """
+    pmid -> the PMIDs it cites (elink pubmed_pubmed_refs). Only papers whose
+    full text is in PubMed Central have a reference list; the rest are absent.
+    """
+    query = urllib.parse.urlencode(
+        _params(dbfrom="pubmed", linkname="pubmed_pubmed_refs", retmode="json", id=pmids), doseq=True)
+    request = urllib.request.Request(
+        f"{EUTILS}/elink.fcgi", data=query.encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with urllib.request.urlopen(request, timeout=120) as response:
+        body = json.load(response)
+    out = {}
+    for linkset in body.get("linksets", []):
+        ids = linkset.get("ids") or []
+        dbs = linkset.get("linksetdbs") or []
+        if len(ids) == 1 and dbs:
+            out[str(ids[0])] = [str(x) for x in dbs[0].get("links", [])]
+    return out
+
+
 def esearch(term: str, retmax: int = 5, retries: int = 3) -> list[str]:
     """PMIDs matching a PubMed query; [] if the search keeps failing."""
     query = urllib.parse.urlencode(_params(term=term, retmode="json", retmax=retmax))
