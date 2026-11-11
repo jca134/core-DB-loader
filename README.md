@@ -244,6 +244,26 @@ RETURN p, paper, g LIMIT 25
 
 Raw sequence strings and lineage tables stay in Postgres only.
 
+### Asking in plain English
+
+For people who don't write Cypher: Claude turns a question into Cypher, runs
+it against the graph, and answers, showing every query it ran so the answer
+can be checked in Neo4j Browser. Queries run in read-only transactions, so a
+bad query can't change the graph.
+
+It needs an Anthropic API key (from <https://console.anthropic.com>), exported
+as `ANTHROPIC_API_KEY`. Each question costs a few cents.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+uv run python -m core_data_loader.query.ask_graph "Which antibodies target GP?"
+uv run python -m core_data_loader.query.ask_graph --serve   # web page at http://localhost:8765
+```
+
+`--show-schema` prints the graph description Claude is given. That
+description is generated from the live graph, so it stays current after every
+export.
+
 ## Project layout
 
 | Path | Purpose |
@@ -258,6 +278,7 @@ Raw sequence strings and lineage tables stay in Postgres only.
 | `core_data_loader/loaders/` | One script per source; loads raw files into `raw.<table>` |
 | `core_data_loader/etl/` | Transforms `raw.*` tables into `core.*` |
 | `core_data_loader/export/export_neo4j.py` | Rebuilds the Neo4j graph from `core.*` |
+| `core_data_loader/query/ask_graph.py` | Plain-English questions -> Cypher -> answers (CLI and web page) |
 | `core_data_loader/profiling/profile_bvbrc.py` | Profiles `raw.bvbrc_*` columns, writes `profile/bvbrc_profile.csv` |
 | `sql/` | Schema DDL — run once against a fresh database |
 | `overview/` | Project orientation, the SerenQA paper, and team planning docs (git-ignored) |
