@@ -9,6 +9,32 @@ The database is the domain knowledge graph for the **SerenQA** serendipity-aware
 KGQA algorithm — see `overview/README.md` for the full project orientation,
 including which schema decisions that algorithm drives.
 
+## Quick start: query the graph
+
+Assumes the database is already built and Neo4j is installed (one-time setup
+is under [Graph database (Neo4j)](#graph-database-neo4j)).
+
+```bash
+# 1. Make sure Neo4j is running
+brew services start neo4j
+
+# 2. Refresh the graph from Postgres (after any data change; ~20 s)
+uv run python -m core_data_loader.export.export_neo4j
+
+# 3a. Ask questions in plain English -> open http://localhost:8765
+export ANTHROPIC_API_KEY=sk-ant-...
+uv run python -m core_data_loader.query.ask_graph --serve
+
+# 3b. ...or one question from the terminal
+uv run python -m core_data_loader.query.ask_graph "Which antibodies target GP?"
+```
+
+| What | Where |
+| --- | --- |
+| Plain-English query page | <http://localhost:8765> (while `--serve` is running) |
+| Neo4j Browser (write Cypher yourself) | <http://localhost:7474>, user `neo4j`, password `filovirus` |
+| Stop Neo4j | `brew services stop neo4j` |
+
 ## Prerequisites
 
 - **Python 3.11+**
