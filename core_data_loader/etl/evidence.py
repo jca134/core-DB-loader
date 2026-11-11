@@ -38,6 +38,7 @@ import re
 
 from sqlalchemy import text
 
+from core_data_loader.common.db_utils import clean_text
 from core_data_loader.common.etl_common import (
     add_provenance,
     add_xref,
@@ -58,6 +59,7 @@ from core_data_loader.common.kg_keywords import (
     CONFIDENCE,
     KeywordMatcher,
 )
+from core_data_loader.common.link_keys import apply_reviews
 
 # Owned outright -- replaced wholesale on every run. core.publication is NOT
 # here: etl.immport writes lineage for it too, so it is passed as a shared
@@ -76,6 +78,7 @@ PATENT_LINKS_TABLE = "uspto_patent_entity_links"
 PATENT_TEAM_PAPERS_TABLE = "uspto_patent_team_papers"
 PATENT_CITED_PUBS_TABLE = "uspto_patent_cited_publications"
 PATENT_DETAILS_TABLE = "uspto_patent_details"
+PAPER_CITATIONS_TABLE = "papers_citations"
 PAPERS_TABLE = "papers_unique"
 PAPER_REFS_TABLE = "papers_references"
 PAPER_META_TABLE = "papers_metadata"
@@ -285,6 +288,10 @@ def build_grants(conn, matcher, links, xref_rows, provenance_rows, sid):
         return {}, {}
 
     raw = read_raw(GRANTS_TABLE).fillna("")
+    # Clean the text once, here, so every use downstream -- stored columns,
+    # relevance tiers, keyword matching -- sees decoded text ('β', not '&#946;').
+    for column in ("project_title", "abstract_text"):
+        raw[column] = raw[column].map(lambda v: clean_text(v) or "")
     raw["award_key_"] = [
         award_key(r.core_project_num, r.project_num, r.activity_code)
         for r in raw.itertuples(index=False)
@@ -470,8 +477,8 @@ def _upsert_cited_paper(conn, r, sid, yield_sid=None) -> int:
         UPSERT_CITED_PUBLICATION_SQL,
         {
             "pubmed_id": pmid,
-            "title": blank_to_none(r.title),
-            "abstract": blank_to_none(r.abstract),
+            "title": clean_text(r.title),
+            "abstract": clean_text(r.abstract),
             "mesh_terms": blank_to_none(r.mesh_terms),
             "authors": blank_to_none(r.authors),
             "journal": blank_to_none(r.journal),
@@ -624,7 +631,7 @@ def build_patent_publication_links(conn, links, patent_ids, sid):
             continue
         links.add("patent", patent_id, "publication", publication_id, "cites",
                   CONFIDENCE["identifier"], sid,
-                  _support("identifier", "citation", matched_term=blank_to_none(citation),
+                  _support("identifier", "citation", matched_term=clean_text(citation),
                            term_type=how))
         linked += 1
     print(f"patent -> paper: {linked} citations linked "
@@ -796,6 +803,281 @@ def build_grant_ack_links(conn, links, award_ids, sid):
 
 
 # ---------------------------------------------------------------------------
+# Same-type document references: paper -> paper, patent -> patent, grant -> grant
+# ---------------------------------------------------------------------------
+
+# An NIH core project number, e.g. R01AI123456 / U19 AI109762.
+CORE_PROJECT_RE = re.compile(r"\b([A-Z]\d{2})\s?([A-Z]{2})\s?(\d{6})\b")
+# The institute + serial part of a core project number (AI102347 in
+# R43AI102347): the same project across its funding stages -- R43 -> R44
+# (small-business phase I -> II), R56 -> R01, R21 -> R33.
+PROJECT_SERIAL_RE = re.compile(r"^[A-Z]\d{2}([A-Z]{2}\d{6})$")
+# Preprint servers, as PubMed names their journal.
+PREPRINT_JOURNAL_RE = re.compile(r"biorxiv|medrxiv|research square|arxiv|ssrn|preprints", re.IGNORECASE)
+
+
+def build_document_citations(conn, links, patent_ids, source_ids):
+    """
+    Documents that reference another document of the same kind, as direct
+    edges -- only when both ends are in the graph, never guessed:
+
+      paper  -cites->   paper   its PubMed reference list (fetch paper-citations)
+      patent -cites->   patent  its Google Patents citation tables, read from both
+                                ends: A's "cites" and B's "cited by" (fetch
+                                patent-details)
+      patent -related-> patent  the same patent family: an application and the
+                                patent later granted for it
+      grant  -cites->   grant   a grant's own text naming another grant's core
+                                project number
+      grant  -related-> grant   the same NIH project at another funding stage:
+                                same institute + serial, different activity
+                                code (R43AI102347 -> R44AI102347), earlier ->
+                                later
+      paper  -related-> paper   a preprint and its published version: the same
+                                title, one in a preprint server's "journal"
+    """
+    counts = {}
+
+    def add(kind, etype, eid, tid, relation, sid, field, term, term_type):
+        if eid is None or tid is None or eid == tid:
+            return
+        links.add(etype, eid, etype, tid, relation, CONFIDENCE["identifier"], sid,
+                  _support(field, "exact_id", term, term_type))
+        counts[kind] = counts.get(kind, 0) + 1
+
+    if raw_table_exists(PAPER_CITATIONS_TABLE):
+        pub_ids = dict(conn.execute(text("SELECT pubmed_id, publication_id FROM core.publication")).fetchall())
+        for r in read_raw(PAPER_CITATIONS_TABLE).itertuples(index=False):
+            add("paper cites paper", "publication", pub_ids.get(r.pmid), pub_ids.get(r.cited_pmid),
+                "cites", source_ids["pubmed"], "identifier", f"PMID {r.cited_pmid}", "pubmed_reference_list")
+
+    if raw_table_exists(PATENT_DETAILS_TABLE):
+        details = read_raw(PATENT_DETAILS_TABLE).fillna("")
+        if "cited_patents" in details.columns:
+            for r in details.itertuples(index=False):
+                this = patent_ids.get(normalize_document_id(r.document_id))
+                for number in filter(None, r.cited_patents.split(";")):
+                    add("patent cites patent", "patent", this, patent_ids.get(normalize_document_id(number)),
+                        "cites", source_ids["uspto"], "identifier", number, "google_patents_citation")
+                for number in filter(None, r.cited_by_patents.split(";")):
+                    add("patent cites patent", "patent", patent_ids.get(normalize_document_id(number)), this,
+                        "cites", source_ids["uspto"], "identifier", r.document_id, "google_patents_citation")
+
+    # Same family: the application (A*) points at the granted patent (B*).
+    families = {}
+    for patent_id, family_id, kind in conn.execute(text(
+            "SELECT patent_id, family_id, kind_code FROM core.patent WHERE family_id IS NOT NULL")):
+        families.setdefault(family_id, []).append((kind or "", patent_id))
+    for family_id, members in families.items():
+        applications = [p for k, p in members if k.startswith("A")]
+        granted = [p for k, p in members if k.startswith("B")]
+        for a in applications:
+            for g in granted:
+                add("patent same family", "patent", a, g, "related", source_ids["uspto"],
+                    "identifier", f"family {family_id}", "same_patent_family")
+
+    # A grant naming another grant's core project number in its own text.
+    by_core = {}
+    for core, award_id in conn.execute(text("SELECT core_project_num, grant_award_id FROM core.grant_award")):
+        by_core.setdefault(core, set()).add(award_id)
+    for award_id, funding_id, title, abstract in conn.execute(text(
+            "SELECT grant_award_id, grant_funding_id, project_title, abstract_text FROM core.grant_funding")):
+        for field, value in (("title", title or ""), ("abstract", abstract or "")):
+            for m in CORE_PROJECT_RE.finditer(value):
+                targets = by_core.get("".join(m.groups()), set())
+                if len(targets) == 1:   # a truncated contract number can mean several awards
+                    target = next(iter(targets))
+                    if target != award_id:
+                        links.add("grant_award", award_id, "grant_award", target, "cites",
+                                  CONFIDENCE["identifier"], source_ids["nih_reporter"],
+                                  _support(field, "exact_id", m.group(0), "grant_number_in_text", False, funding_id))
+                        counts["grant cites grant"] = counts.get("grant cites grant", 0) + 1
+
+    # One NIH project across funding stages.
+    stages = {}
+    for award_id, core, first_year in conn.execute(text(
+            "SELECT grant_award_id, core_project_num, first_fiscal_year FROM core.grant_award")):
+        m = PROJECT_SERIAL_RE.match(core or "")
+        if m:
+            stages.setdefault(m.group(1), []).append((first_year or 0, core, award_id))
+    for serial, awards in stages.items():
+        awards.sort()
+        for (_, core_a, a), (_, core_b, b) in zip(awards, awards[1:]):
+            if core_a != core_b:
+                add("grant same project", "grant_award", a, b, "related", source_ids["nih_reporter"],
+                    "identifier", f"{core_a} -> {core_b}", "same_nih_project_serial")
+
+    # A preprint and its published version.
+    by_title = {}
+    for publication_id, title, journal in conn.execute(text(
+            "SELECT publication_id, title, journal FROM core.publication WHERE title IS NOT NULL")):
+        key = " ".join(re.sub(r"[^0-9a-z]+", " ", title.lower()).split())
+        by_title.setdefault(key, []).append((publication_id, bool(PREPRINT_JOURNAL_RE.search(journal or ""))))
+    for papers in by_title.values():
+        preprints = [p for p, is_pre in papers if is_pre]
+        published = [p for p, is_pre in papers if not is_pre]
+        for pre in preprints:
+            for pub in published:
+                add("preprint of paper", "publication", pre, pub, "related", source_ids["pubmed"],
+                    "identifier", "identical title", "preprint_of_published")
+
+    print("same-type document links: " + (", ".join(f"{v} {k}" for k, v in counts.items()) or "none"))
+
+
+# ---------------------------------------------------------------------------
+# Grant -> patent: the patent's federal-support statement
+# ---------------------------------------------------------------------------
+
+# An NIH research grant inside free text: optional type/activity prefix, the
+# institute code, the serial: "AI066487", "R43 AI066487-01", "U19 AI-109762".
+# Patents also write the serial without its leading zero ("AI 51292" is
+# AI051292) and misprint the institute ("A1057153" for AI057153).
+GRANT_IN_TEXT_RE = re.compile(r"(?<![A-Z0-9])(?:\d?[A-Z]\d{2}\s?)?([A-Z][A-Z1])\s?-?\s?(\d{5,6})(?!\d)")
+
+
+def grant_serial(match) -> str:
+    """'AI051292' from a GRANT_IN_TEXT_RE match: institute fixed, serial zero-padded."""
+    institute = "AI" if match.group(1) == "A1" else match.group(1)
+    return institute + match.group(2).zfill(6)
+# NIH contracts: "HHSN272201400058C", "HHSN-261-2015-00003I", "75N93020C00012".
+CONTRACT_IN_TEXT_RE = re.compile(r"HHSN[\s-]?([\d\s-]{9,16})[A-Z]?|(75N9\d{4}[A-Z]\d{5})")
+
+
+def build_grant_patent_links(conn, links, patent_ids, sid):
+    """
+    grant -funds-> patent, from the patent's own statement of government
+    interest ("made with government support under AI066487 awarded by NIH"),
+    fetched with `filovirus fetch patent-details`. Only exact numbers of
+    grants in the graph link; DoD, DARPA and other agencies' numbers have no
+    grant node to point at and are left alone.
+    """
+    if not raw_table_exists(PATENT_DETAILS_TABLE):
+        return
+    details = read_raw(PATENT_DETAILS_TABLE).fillna("")
+    if "government_interest" not in details.columns:
+        print("grant -> patent: no government-interest statements fetched, skipped")
+        return
+
+    by_serial, contracts = {}, []
+    for award_id, core, award_key in conn.execute(text(
+            "SELECT grant_award_id, core_project_num, award_key FROM core.grant_award")):
+        m = PROJECT_SERIAL_RE.match(core or "")
+        if m:
+            by_serial.setdefault(m.group(1), set()).add(award_id)
+        else:
+            contracts.append((re.sub(r"[^0-9A-Z]", "", (award_key or "").upper()), award_id))
+    institutes = {serial[:2] for serial in by_serial}
+
+    statements = linked = 0
+    for r in details.itertuples(index=False):
+        statement = r.government_interest
+        patent_id = patent_ids.get(normalize_document_id(r.document_id))
+        if not statement or patent_id is None:
+            continue
+        statements += 1
+        targets = {}
+        for m in GRANT_IN_TEXT_RE.finditer(statement):
+            serial = grant_serial(m)
+            if serial[:2] in institutes:
+                for award_id in by_serial.get(serial, ()):
+                    targets[award_id] = m.group(0).strip()
+        for m in CONTRACT_IN_TEXT_RE.finditer(statement):
+            number = re.sub(r"[^0-9A-Z]", "", (m.group(1) or m.group(2)).upper())
+            for key, award_id in contracts:
+                if len(number) >= 9 and key.startswith(number[:12]):
+                    targets[award_id] = m.group(0).strip()
+        for award_id, number in targets.items():
+            links.add("grant_award", award_id, "patent", patent_id, "funds", CONFIDENCE["identifier"], sid,
+                      _support("identifier", "exact_id", number, "patent_government_interest"))
+            linked += 1
+    print(f"grant -> patent: {statements} patents state federal support; {linked} links to grants in the graph")
+
+
+# ---------------------------------------------------------------------------
+# Countermeasures named in documents
+# ---------------------------------------------------------------------------
+
+def build_countermeasure_links(conn, links, source_ids):
+    """
+    grant / patent / paper -related-> countermeasure, where the document's
+    title or abstract names it (curated/countermeasures.py `names`, matched as
+    whole words, case-insensitively). Product names are specific -- "ZMapp",
+    "REGN-EB3", "remdesivir" -- so no ambiguity penalty applies.
+    """
+    patterns = [
+        (cid, re.compile(r"(?<![0-9A-Za-z])(" + "|".join(re.escape(n) for n in names) + r")(?![0-9A-Za-z])",
+                         re.IGNORECASE))
+        for cid, names in conn.execute(text("SELECT countermeasure_id, names FROM core.countermeasure"))
+    ]
+    if not patterns:
+        return
+    counts = {}
+
+    def scan(etype, eid, sid, fields, funding_id=None):
+        for field, value in fields:
+            for cid, pattern in patterns:
+                m = pattern.search(value or "")
+                if m:
+                    links.add(etype, eid, "countermeasure", cid, "related", CONFIDENCE[field], sid,
+                              _support(field, "keyword", m.group(1), "countermeasure_name", False, funding_id))
+                    counts[etype] = counts.get(etype, 0) + 1
+
+    for award_id, funding_id, title, abstract in conn.execute(text(
+            "SELECT grant_award_id, grant_funding_id, project_title, abstract_text FROM core.grant_funding")):
+        scan("grant_award", award_id, source_ids["nih_reporter"], (("title", title), ("abstract", abstract)), funding_id)
+    for patent_id, title, abstract in conn.execute(text("SELECT patent_id, title, abstract FROM core.patent")):
+        scan("patent", patent_id, source_ids["uspto"], (("title", title), ("abstract", abstract)))
+    for pub_id, title, abstract in conn.execute(text("SELECT publication_id, title, abstract FROM core.publication")):
+        scan("publication", pub_id, source_ids["pubmed"], (("title", title), ("abstract", abstract)))
+    print("document -> countermeasure: " + ", ".join(f"{v} {k} mentions" for k, v in counts.items()))
+
+
+# ---------------------------------------------------------------------------
+# Organizations
+# ---------------------------------------------------------------------------
+
+def build_organizations(conn):
+    """
+    core.organization from grant recipients and patent assignees/applicants,
+    merged across spellings by curated/organizations.py, and the
+    grant/patent -> organization link tables.
+    """
+    from core_data_loader.curated.organizations import display_name, kind_of, normalize, split_names
+
+    spellings, grant_rows, patent_rows = {}, [], []
+    for award_id, org in conn.execute(text("SELECT grant_award_id, org_name FROM core.grant_award")):
+        for name in split_names(org):
+            key = normalize(name)
+            spellings.setdefault(key, []).append(name)
+            grant_rows.append((award_id, key))
+    for patent_id, assignee, applicant in conn.execute(text(
+            "SELECT patent_id, assignee, applicant_name FROM core.patent")):
+        for role, field in (("assignee", assignee), ("applicant", applicant)):
+            for name in split_names(field):
+                key = normalize(name)
+                spellings.setdefault(key, []).append(name)
+                patent_rows.append((patent_id, key, role))
+
+    ids = {}
+    for key in sorted(spellings):
+        ids[key] = conn.execute(text(
+            "INSERT INTO core.organization (org_key, name, kind, spellings) VALUES (:k, :n, :kind, :s) "
+            "RETURNING organization_id"),
+            {"k": key, "n": display_name(key, spellings[key]), "kind": kind_of(key),
+             "s": sorted(set(spellings[key]))}).scalar()
+    for award_id, key in set(grant_rows):
+        conn.execute(text("INSERT INTO core.grant_award_organization VALUES (:a, :o) ON CONFLICT DO NOTHING"),
+                     {"a": award_id, "o": ids[key]})
+    for patent_id, key, role in set(patent_rows):
+        conn.execute(text("INSERT INTO core.patent_organization VALUES (:p, :o, :r) ON CONFLICT DO NOTHING"),
+                     {"p": patent_id, "o": ids[key], "r": role})
+    grant_keys = {k for _, k in grant_rows}
+    patent_keys = {k for _, k, _ in patent_rows}
+    print(f"core.organization: {len(ids)} rows ({len(grant_keys)} grant recipients, "
+          f"{len(patent_keys)} patent owners, {len(grant_keys & patent_keys)} both)")
+
+
+# ---------------------------------------------------------------------------
 # Patents
 # ---------------------------------------------------------------------------
 
@@ -911,7 +1193,7 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
         if date_published is None and safe_date(detail.get("publication_date")):
             date_published = safe_date(detail["publication_date"])
             filled_dates += 1
-        abstract = blank_to_none(detail.get("abstract"))
+        abstract = clean_text(detail.get("abstract"))
 
         patent_id = conn.execute(
             text(
@@ -930,7 +1212,7 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
             {
                 "document_id": document_id,
                 "kind_code": kind.group(1) if kind else None,
-                "title": blank_to_none(first["title"]),
+                "title": clean_text(first["title"]),
                 "family_id": blank_to_none(first["family_id"]),
                 "application_num": blank_to_none(first["application_number"]),
                 "date_published": date_published,
@@ -1075,7 +1357,7 @@ def build_papers(conn, links, xref_rows, provenance_rows, sid, cited_sid=None, p
             ),
             {
                 "pubmed_id": pmid,
-                "title": blank_to_none(meta.title) if meta is not None else None,
+                "title": clean_text(meta.title) if meta is not None else None,
                 "authors": blank_to_none(meta.authors) if meta is not None else None,
                 "journal": blank_to_none(meta.journal) if meta is not None else None,
                 "year": blank_to_none(meta.year) if meta is not None else None,
@@ -1238,6 +1520,7 @@ WHERE (entity_type = 'taxon'     AND NOT EXISTS (SELECT 1 FROM core.taxon     t 
    OR (entity_type = 'condition' AND NOT EXISTS (SELECT 1 FROM core.condition c WHERE c.condition_id::text = el.entity_id))
    OR (entity_type = 'structure' AND NOT EXISTS (SELECT 1 FROM core.structure s WHERE s.structure_id::text = el.entity_id))
    OR (entity_type = 'isolate'   AND NOT EXISTS (SELECT 1 FROM core.isolate   i WHERE i.isolate_id::text   = el.entity_id))
+   OR (entity_type = 'countermeasure' AND NOT EXISTS (SELECT 1 FROM core.countermeasure c WHERE c.countermeasure_id::text = el.entity_id))
    OR (entity_type = 'sequence'  AND NOT EXISTS (SELECT 1 FROM core.sequence  q WHERE q.sequence_id::text  = el.entity_id))
    OR (entity_type = 'feature'   AND NOT EXISTS (SELECT 1 FROM core.feature   f WHERE f.feature_id::text   = el.entity_id))
    OR (entity_type = 'study'     AND NOT EXISTS (SELECT 1 FROM core.study     y WHERE y.study_accession    = el.entity_id))
@@ -1260,6 +1543,7 @@ def main():
     # papers are upserted onto it. Everything else here is owned outright.
     truncate(
         "core.evidence_link_support", "core.evidence_link",
+        "core.grant_award_organization", "core.patent_organization", "core.organization",
         "core.patent_cpc", "core.patent",
         "core.grant_funding", "core.grant_award",
     )
@@ -1285,10 +1569,18 @@ def main():
         build_grant_publication_links(conn, links, award_ids, source_ids["nih_reporter"])
         build_grant_ack_links(conn, links, award_ids, source_ids["nih_reporter"])
         build_patent_publication_links(conn, links, patent_ids, source_ids["uspto"])
+        build_document_citations(conn, links, patent_ids, source_ids)
+        build_grant_patent_links(conn, links, patent_ids, source_ids["nih_reporter"])
+        build_countermeasure_links(conn, links, source_ids)
+        build_organizations(conn)
 
         link_rows, support_rows = links.write(conn, provenance_rows)
         print(f"core.evidence_link: {link_rows} rows")
         print(f"core.evidence_link_support: {support_rows} rows")
+
+        reviewed = apply_reviews(conn)
+        if reviewed:
+            print(f"  {reviewed} links carry a saved human review (ops.link_review)")
 
         orphans = conn.execute(text(ORPHAN_CHECK_SQL)).fetchall()
         # A publication with no edge at all is invisible to any graph query.

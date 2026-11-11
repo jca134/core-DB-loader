@@ -14,7 +14,7 @@ def test_every_loader_and_fetcher_module_exists_and_has_main(module):
 
 @pytest.mark.parametrize("argv", [
     ["init-db"], ["load"], ["load", "grants", "patents"], ["fetch", "all"], ["build", "--skip-checks"],
-    ["check"], ["compare", "filovirus_test"], ["export"], ["serve", "--port", "9000"], ["ask", "what?"], ["rebuild", "--no-export"],
+    ["check"], ["compare", "filovirus_test"], ["export"], ["graph-report"], ["review-stats"], ["serve", "--port", "9000"], ["ask", "what?"], ["rebuild", "--no-export"],
 ])
 def test_subcommands_parse(argv):
     args = parser().parse_args(argv)

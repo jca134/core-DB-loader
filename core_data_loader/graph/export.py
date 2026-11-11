@@ -82,6 +82,8 @@ NODES = [
     ("Grant", "grant_award", "grant_award_id", "project_title"),
     ("GrantFunding", "grant_funding", "grant_funding_id", "project_num"),
     ("Patent", "patent", "patent_id", "title"),
+    ("Countermeasure", "countermeasure", "countermeasure_id", "name"),
+    ("Organization", "organization", "organization_id", "name"),
 ]
 LABEL_KEY = {label: key for label, _, key, _ in NODES}
 
@@ -153,6 +155,19 @@ EDGES = [
     ("Sequence", "MEMBER_OF", "Alignment",
      "SELECT sequence_id s, alignment_id d, strain_label, row_order FROM core.alignment_member"),
     ("GrantFunding", "FUNDING_OF", "Grant", "SELECT grant_funding_id s, grant_award_id d FROM core.grant_funding"),
+    # Countermeasures (curated/countermeasures.py).
+    ("Countermeasure", "TARGETS", "Taxon", "SELECT countermeasure_id s, taxon_id d FROM core.countermeasure_taxon"),
+    ("Countermeasure", "ACTS_ON", "GeneFamily",
+     "SELECT countermeasure_id s, gene_family_id d FROM core.countermeasure_gene_family"),
+    ("Countermeasure", "CONTAINS", "Antibody",
+     "SELECT countermeasure_id s, antibody_id d FROM core.countermeasure_antibody"),
+    ("Countermeasure", "TESTED_IN", "Study",
+     "SELECT countermeasure_id s, study_accession d FROM core.countermeasure_study"),
+    # Organizations (curated/organizations.py).
+    ("Grant", "AWARDED_TO", "Organization",
+     "SELECT grant_award_id s, organization_id d FROM core.grant_award_organization"),
+    ("Patent", "ASSIGNED_TO", "Organization",
+     "SELECT patent_id s, organization_id d, role FROM core.patent_organization"),
 ]
 
 # core.evidence_link's entity_type / evidence_type values -> node labels.
@@ -161,7 +176,7 @@ EVIDENCE_LABELS = {
     "taxon": "Taxon", "gene": "Gene", "antibody": "Antibody", "epitope": "Epitope",
     "structure": "Structure", "feature": "Feature", "isolate": "Isolate",
     "condition": "Condition", "symptom": "Symptom", "assay_type": "AssayType",
-    "study": "Study",
+    "study": "Study", "countermeasure": "Countermeasure",
 }
 
 # One row per evidence link, with its support rows rolled up: the distinct
@@ -289,6 +304,25 @@ def export_evidence(conn, session, mismatches):
             mismatches.append(f"evidence {src}-{rel}->{dst}: {created} of {len(rows)} links")
 
 
+def export_document_dates(conn, session):
+    """
+    One comparable `date` per Grant, Patent and Publication (core.v_document_date:
+    when it became public), with `date_precision` and `date_basis` saying how
+    exact it is and where it came from.
+    """
+    labels = {"grant_award": "Grant", "patent": "Patent", "publication": "Publication"}
+    rows = {}
+    for doc_type, doc_id, date, precision, basis in conn.execute(text(
+            "SELECT document_type, document_id, date, date_precision, date_basis FROM core.v_document_date")):
+        rows.setdefault(doc_type, []).append({"id": doc_id, "date": date, "precision": precision, "basis": basis})
+    for doc_type, label in labels.items():
+        key = LABEL_KEY[label]
+        set_ = _write(session, f"UNWIND $rows AS r MATCH (n:{label} {{{key}: r.id}}) "
+                               "SET n.date = r.date, n.date_precision = r.precision, n.date_basis = r.basis "
+                               "RETURN count(n)", rows.get(doc_type, []))
+        print(f"  {label}.date set on {set_} nodes")
+
+
 def main():
     started = time.time()
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
@@ -302,6 +336,7 @@ def main():
         print("relationships:")
         export_edges(conn, session, mismatches)
         export_evidence(conn, session, mismatches)
+        export_document_dates(conn, session)
         nodes = session.run("MATCH (n) RETURN count(n)").single()[0]
         rels = session.run("MATCH ()-[r]->() RETURN count(r)").single()[0]
     driver.close()

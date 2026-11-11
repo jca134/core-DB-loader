@@ -1,6 +1,6 @@
 """
-Fetches each patent's abstract and its publication, filing and priority dates
-from its public Google Patents page, and writes them to
+Fetches each patent's abstract, its publication, filing and priority dates, and
+the patents it cites and is cited by, from its public Google Patents page, and writes them to
 data/patents/patent_details.csv for loaders/patents.py to pick up.
 
     filovirus fetch patent-details
@@ -40,7 +40,40 @@ OUTPUT_FILEPATH = data_path("patents", "patent_details.csv")
 PAGE_URL = "https://patents.google.com/patent/{number}/en"
 USER_AGENT = "core-DB-loader (filovirus research knowledge graph)"
 REQUEST_PAUSE = 2.0   # seconds between requests
-COLUMNS = ["document_id", "publication_date", "filing_date", "priority_date", "abstract", "url"]
+COLUMNS = ["document_id", "publication_date", "filing_date", "priority_date", "abstract",
+           "cited_patents", "cited_by_patents", "government_interest", "url"]
+
+# US patents from federally funded work must say so in the description: "This
+# invention was made with government support under AI123456 awarded by NIH."
+# The statement is kept verbatim (a few sentences from the first match); the
+# build pulls grant numbers out of it.
+GOVERNMENT_INTEREST_RE = re.compile(
+    r"government support|government interest|government rights|federally[- ]sponsored|"
+    r"federal funding|made with (?:the )?support of|supported,? in (?:whole or in )?part,? by",
+    re.IGNORECASE,
+)
+TAG_RE = re.compile(r"<[^>]+>")
+
+
+def government_interest(page: str) -> str:
+    """The federal-support statement in the patent's description, or ''."""
+    start = page.find('itemprop="description"')
+    if start < 0:
+        return ""
+    body = " ".join(html.unescape(TAG_RE.sub(" ", page[start:])).split())
+    m = GOVERNMENT_INTEREST_RE.search(body)
+    if not m:
+        return ""
+    sentence_start = body.rfind(". ", 0, m.start()) + 2 if body.rfind(". ", 0, m.start()) >= 0 else 0
+    return body[max(sentence_start, m.start() - 300): m.end() + 500]
+
+# Google Patents' own citation tables, as <tr itemprop=...> rows each holding
+# a <span itemprop="publicationNumber">. "Orig" rows are the citations printed
+# on the patent; the others are added by the examiner or later search. The
+# family-level tables (citations of any patent in the family) are left out:
+# they would credit this document with citations it doesn't make.
+CITES_ITEMPROPS = {"backwardReferences", "backwardReferencesOrig"}
+CITED_BY_ITEMPROPS = {"forwardReferences", "forwardReferencesOrig"}
 
 NUMBER_RE = re.compile(r"^\s*([A-Z]{2})\s*(\d+)\s*([A-Z]\d?)\s*$")
 
@@ -52,19 +85,41 @@ def compact_number(document_id: str) -> str | None:
 
 
 class _PatentPage(HTMLParser):
-    """Collects the DC.description meta tag and the first date of each itemprop kind."""
+    """
+    Collects the DC.description meta tag, the first date of each itemprop
+    kind, and the publication numbers in the citation tables.
+    """
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.abstract = ""
         self.dates = {}
+        self.cites, self.cited_by = [], []
+        self._row = None          # which citation list the open <tr> belongs to
+        self._in_number = False
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
+        prop = a.get("itemprop")
         if tag == "meta" and a.get("name") == "DC.description" and not self.abstract:
             self.abstract = " ".join(html.unescape(a.get("content") or "").split())
-        elif tag == "time" and a.get("itemprop") and a.get("datetime"):
-            self.dates.setdefault(a["itemprop"], a["datetime"])
+        elif tag == "time" and prop and a.get("datetime") and self._row is None:
+            self.dates.setdefault(prop, a["datetime"])
+        elif tag == "tr":
+            self._row = (self.cites if prop in CITES_ITEMPROPS
+                         else self.cited_by if prop in CITED_BY_ITEMPROPS else None)
+        elif tag == "span" and prop == "publicationNumber" and self._row is not None:
+            self._in_number = True
+
+    def handle_data(self, data):
+        if self._in_number and data.strip():
+            if data.strip() not in self._row:
+                self._row.append(data.strip())
+            self._in_number = False
+
+    def handle_endtag(self, tag):
+        if tag == "tr":
+            self._row = None
 
 
 def parse_page(page: str) -> dict:
@@ -76,6 +131,9 @@ def parse_page(page: str) -> dict:
         "filing_date": parser.dates.get("filingDate", ""),
         "priority_date": parser.dates.get("priorityDate", ""),
         "abstract": parser.abstract,
+        "cited_patents": ";".join(parser.cites),
+        "cited_by_patents": ";".join(parser.cited_by),
+        "government_interest": government_interest(page),
     }
 
 
@@ -103,7 +161,8 @@ def main():
     if OUTPUT_FILEPATH.exists():
         with open(OUTPUT_FILEPATH, newline="", encoding="utf-8") as f:
             done = {r["document_id"]: r for r in csv.DictReader(f)}
-    todo = [n for n in numbers if n not in done]
+    # A row written before a column existed lacks that key: refetch it.
+    todo = [n for n in numbers if n not in done or done[n].get("government_interest") is None]
     print(f"{len(numbers)} patents; {len(done)} already fetched, fetching {len(todo)}")
 
     failed = []

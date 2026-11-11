@@ -67,6 +67,17 @@
   .keybox label { font-size:.88rem; display:flex; gap:6px; align-items:center; }
   .status { font-size:.86rem; color:var(--muted); }
   .status b { color:var(--ok); }
+  .review-card { border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-top:12px; }
+  .review-card .doc { font-weight:600; }
+  .review-card .muted { color:var(--muted); font-size:.86rem; }
+  .review-card .arrow { margin:8px 0; font-size:.95rem; }
+  .snip { background:var(--code); border-radius:7px; padding:8px 10px; font-size:.86rem; margin-top:8px; }
+  .snip mark { background:var(--accent-soft); color:var(--ink); padding:0 2px; border-radius:3px; font-weight:600; }
+  .btn-ok, .btn-bad, .btn-skip { border:0; border-radius:8px; padding:8px 16px; font:inherit; font-weight:600; cursor:pointer; }
+  .btn-ok { background:color-mix(in srgb, var(--ok) 22%, transparent); color:var(--ok); }
+  .btn-bad { background:color-mix(in srgb, var(--err) 18%, transparent); color:var(--err); }
+  .btn-skip { background:var(--code); color:var(--muted); }
+  table.stats td, table.stats th { padding:4px 10px; }
 </style>
 </head>
 <body>
@@ -85,6 +96,19 @@
         <div class="result" id="tresult"></div>
       </div>
     </div>
+  </section>
+
+  <section class="card">
+    <h2>Review links <span class="tag free">Free</span></h2>
+    <p class="hint">Keyword-based links from grants and patents carry a confidence score that has never been checked against reality. Mark a sample as right or wrong and the score becomes a measured precision. Reviews are saved and survive rebuilds; <code>filovirus review-stats</code> prints the totals.</p>
+    <div class="row">
+      <label class="muted">Confidence level
+        <select id="rtier"><option value="">any</option><option>0.70</option><option>0.50</option><option>0.35</option><option>0.25</option></select>
+      </label>
+      <button class="primary" id="rstart">Show a link</button>
+    </div>
+    <div id="rcard"></div>
+    <div id="rstats" style="margin-top:14px"></div>
   </section>
 
   <section class="card">
@@ -200,6 +224,66 @@ function downloadCSV(columns, rows, title) {
 
 $("run").onclick = runTemplate;
 
+// ---------------------------------------------------------------- link review
+let currentLink = null;
+
+function snippetNode(text) {
+  const div = el("div", "snip");
+  const parts = text.split(/(\[\[.*?\]\])/);
+  for (const part of parts) {
+    const m = part.match(/^\[\[(.*)\]\]$/);
+    if (m) div.appendChild(el("mark", null, m[1])); else div.appendChild(document.createTextNode(part));
+  }
+  return div;
+}
+
+function renderReviewStats(stats) {
+  const box = $("rstats"); box.innerHTML = "";
+  if (!stats) return;
+  const t = el("table", "stats"); const hr = el("tr");
+  ["Confidence", "Links", "Reviewed", "Correct", "Precision"].forEach((h) => hr.appendChild(el("th", null, h)));
+  t.appendChild(hr);
+  for (const r of stats) {
+    const tr = el("tr");
+    [r.confidence.toFixed(2), r.links.toLocaleString(), r.reviewed, r.accepted,
+     r.precision == null ? "—" : Math.round(r.precision * 100) + "%"].forEach((v) => tr.appendChild(el("td", "num", v)));
+    t.appendChild(tr);
+  }
+  box.appendChild(t);
+}
+
+async function showNextLink() {
+  const card = $("rcard"); card.innerHTML = ""; card.appendChild(el("div", "meta", "Loading…"));
+  const link = await api("/api/review/next", { tier: $("rtier").value });
+  card.innerHTML = "";
+  if (link.error) { card.appendChild(el("div", "error", link.error)); return; }
+  if (link.done) { card.appendChild(el("div", "empty", "Every link at this level has been reviewed.")); return; }
+  currentLink = link;
+  const c = el("div", "review-card");
+  c.appendChild(el("div", "muted", (link.document.type === "grant_award" ? "NIH grant" : "Patent") + " · " + (link.document.detail || "")));
+  c.appendChild(el("div", "doc", link.document.title));
+  c.appendChild(el("div", "arrow", `—${link.relation}→ ${link.entity.type.replace("_", " ")}: ${link.entity.name}   (confidence ${link.confidence.toFixed(2)})`));
+  for (const ev of link.evidence) {
+    c.appendChild(el("div", "muted", `matched "${ev.term}" in the ${ev.field}`));
+    if (ev.snippet) c.appendChild(snippetNode(ev.snippet));
+  }
+  c.appendChild(el("p", "muted", "Is this document really about this " + link.entity.type.replace("_", " ") + "?"));
+  const row = el("div", "row");
+  const ok = el("button", "btn-ok", "Correct"), bad = el("button", "btn-bad", "Wrong"), skip = el("button", "btn-skip", "Skip");
+  ok.onclick = () => decide("accepted"); bad.onclick = () => decide("rejected"); skip.onclick = showNextLink;
+  row.append(ok, bad, skip); c.appendChild(row);
+  card.appendChild(c);
+}
+
+async function decide(decision) {
+  if (!currentLink) return;
+  const r = await api("/api/review", { link_key: currentLink.link_key, decision, confidence: currentLink.confidence });
+  if (r.error) { $("rcard").appendChild(el("div", "error", r.error)); return; }
+  renderReviewStats(r.stats);
+  showNextLink();
+}
+$("rstart").onclick = showNextLink;
+
 // ---------------------------------------------------------------- AI section
 function renderAI(status) {
   const area = $("aiarea"); area.innerHTML = "";
@@ -271,6 +355,7 @@ function renderAI(status) {
   const first = document.querySelector(".qitem");
   if (first) first.click();
   renderAI(s);
+  api("/api/review/stats", {}).then((r) => renderReviewStats(r.stats));
 })();
 </script>
 </body>

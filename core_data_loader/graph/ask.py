@@ -65,6 +65,20 @@ Conventions in this graph:
   a protein belongs to: (p:Protein)-[:ENCODED_BY]->(:Feature)-[:ON_SEQUENCE]->
   (:Sequence)-[:FROM_ISOLATE]->(:Isolate)-[:OF_TAXON]->(:Taxon), or via an
   epitope's or structure's own [:OF_TAXON].
+- (:Countermeasure) nodes are curated vaccines, antibody products and antivirals
+  (Ervebo, Inmazeb, Ebanga, ZMapp, remdesivir, ...) with kind, status
+  ('licensed' | 'clinical' | 'preclinical') and regulatory. They [:TARGETS]
+  taxa, [:ACTS_ON] a GeneFamily, [:CONTAINS] antibodies, are [:TESTED_IN] studies;
+  documents that name them have [:RELATED] to them.
+- (:Organization) nodes merge every spelling of a grant recipient or patent owner:
+  (:Grant)-[:AWARDED_TO]->(:Organization), (:Patent)-[:ASSIGNED_TO {role}]->(:Organization).
+- (:Grant)-[:FUNDS]->(:Patent) comes from the patent's government-interest statement.
+- Documents cite each other directly: (:Publication)-[:CITES]->(:Publication),
+  (:Patent)-[:CITES]->(:Patent); [:RELATED] between two documents of the same kind
+  means a preprint and its published version, an application and its granted
+  patent, or one NIH project's successive grants.
+- Grant, Patent and Publication nodes carry `date` (when it became public),
+  `date_precision` ('day' | 'fiscal_year' | 'year') and `date_basis`.
 - Always LIMIT exploratory queries; count(*) before listing large sets.
 
 When you answer: lead with the direct answer, then the supporting rows (as a

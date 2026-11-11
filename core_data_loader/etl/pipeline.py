@@ -14,6 +14,8 @@ database that looks fine and is quietly wrong:
     has to follow it.
   * etl.bvbrc_hfv and etl.ucsc rebuild core.protein and core.gene, dropping
     their gene-family assignments, so etl.gene_family has to follow both.
+  * etl.countermeasure links curated products to taxa, antibodies, studies and
+    gene families, all rebuilt by the steps above, so it follows them.
   * etl.immport truncates core.condition, which CASCADEs into
     core.taxon_condition, so etl.taxon_condition has to follow it.
   * etl.bvbrc_hfv truncates core.isolate and core.epitope_assay, and
@@ -53,6 +55,8 @@ STEPS = [
      "reference gene model — after etl.bvbrc_hfv, which cascades core.gene away"),
     ("core_data_loader.etl.gene_family",
      "filovirus gene families — after etl.bvbrc_hfv and etl.ucsc, which rebuild core.protein and core.gene"),
+    ("core_data_loader.etl.countermeasure",
+     "curated countermeasures — after etl.bvbrc_hfv, etl.immport and etl.gene_family, whose truncates cascade its links"),
     ("core_data_loader.etl.taxon_condition",
      "curated taxon→disease — after etl.immport, which cascades core.taxon_condition away"),
     ("core_data_loader.etl.antibody_target",

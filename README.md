@@ -27,9 +27,26 @@ If everything is already set up:
 
 ```bash
 brew services start neo4j   # if it isn't running
+uv run filovirus export     # (re)generate the graph in Neo4j from Postgres, ~20 s
 uv run filovirus serve      # then open http://localhost:8765
 ```
 
+Rerun `filovirus export` whenever the database changes, since the graph in
+Neo4j is a copy. `filovirus rebuild` loads, builds and exports in one go.
+
+To see the graph's shape, open Neo4j Browser at <http://localhost:7474>
+(user `neo4j`, password `filovirus`) and run:
+
+```cypher
+CALL db.schema.visualization();
+```
+
+It draws every node type once (Taxon, Gene, GeneFamily, Grant, Patent,
+Publication, ...) with the relationship types between them. To look at actual
+data instead, try `MATCH (g:Gene {gene_symbol: 'GP'})<-[r]-(n) RETURN g, r, n LIMIT 50`.
+
+- **Review links (free).** Mark keyword-based links right or wrong; their
+  confidence becomes a measured precision (`filovirus review-stats`).
 - **Pick a question (free).** Ready-made questions with dropdowns, such as
   "Which antibodies target [GP]?" or "Which NIH grants study [Marburg
   viruses]?". Each runs a fixed, checked query and shows it. Results download
@@ -87,6 +104,8 @@ virtualenv is activated.
 | `build` | `raw.*` → `core.*` in the required order, then the data-quality checks |
 | `check` | only the data-quality checks; every failure count should be 0 |
 | `compare OTHER_DB` | compare this database's contents with another build, table by table |
+| `graph-report` | the Neo4j graph's hubs, isolated nodes and degree per node type |
+| `review-stats` | precision of human-reviewed links, per confidence level (review on the query page) |
 | `export` | rebuild the Neo4j graph from `core.*` |
 | `serve` | the query page at <http://localhost:8765> |
 | `ask "QUESTION"` | one plain-English question in the terminal (needs an API key) |
@@ -114,12 +133,13 @@ core_data_loader/
 ├── cli.py          the `filovirus` command
 ├── config.py       every setting and path, from the environment
 ├── common/         DB engine, value parsing, raw/ETL helpers, source catalog, keyword matcher
-├── curated/        hand-curated mappings: taxon→disease, antibody→gene, gene families, symptom/assay vocabularies
+├── curated/        hand-curated knowledge: taxon→disease, antibody→gene, gene families, countermeasures,
+│                   organization names, symptom/assay vocabularies
 ├── loaders/        one per source: data/ → raw.*            (filovirus load)
 ├── fetchers/       NIH RePORTER / PubMed lookups → data/     (filovirus fetch)
 ├── etl/            raw.* → core.*, run in order by pipeline.py   (filovirus build)
 └── graph/          Neo4j export, query page, ready-made questions, Claude questions
-sql/                schema DDL (01–06) and the data-quality checks (checks.sql)
+sql/                schema DDL (01–10) and the data-quality checks (checks.sql)
 tests/              unit tests: pure logic only, no database needed
 docs/               the documentation above
 ```

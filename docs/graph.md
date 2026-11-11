@@ -35,8 +35,16 @@ password anywhere the database is reachable by anyone else.
   every `Gene`, has `IN_FAMILY` to one of seven families. That bridge is how a
   Marburg epitope reaches the grants and patents about GP:
   `(:Epitope)-[:ON_PROTEIN]->(:Protein)-[:IN_FAMILY]->(:GeneFamily)<-[:IN_FAMILY]-(:Gene)<-[:RELATED]-(:Grant)`.
-- **Evidence links** become `RELATED`, `CITES`, `CLAIMS` and `DESCRIBES`
-  relationships, carrying `confidence`, `matched_terms` and `support_count`.
+- **Evidence links** become `RELATED`, `CITES`, `CLAIMS`, `DESCRIBES` and
+  `FUNDS` relationships, carrying `confidence`, `matched_terms` and
+  `support_count`.
+- **Countermeasures** (`Countermeasure`): `TARGETS` taxa, `ACTS_ON` a gene
+  family, `CONTAINS` antibodies, `TESTED_IN` studies.
+- **Organizations** (`Organization`): `(:Grant)-[:AWARDED_TO]->`,
+  `(:Patent)-[:ASSIGNED_TO {role}]->`.
+- **Dates.** Every `Grant`, `Patent` and `Publication` has `date` (when it
+  became public, from `core.v_document_date`), `date_precision`
+  (`day` / `fiscal_year` / `year`) and `date_basis`.
 - **Left out:** raw sequence strings and the lineage tables stay in Postgres.
 
 The export compares every node and relationship count with the Postgres rows
@@ -48,7 +56,9 @@ MATCH (p:Patent)-[:CITES]->(paper:Publication)<-[:CITES]-(g:Grant)
 RETURN p, paper, g LIMIT 25
 ```
 
-Write Cypher yourself in Neo4j Browser: <http://localhost:7474>.
+Write Cypher yourself in Neo4j Browser: <http://localhost:7474>. To see the
+whole model at a glance, with every label and relationship type, run
+`CALL db.schema.visualization();`.
 
 ## The query page
 
@@ -75,6 +85,13 @@ terminal with `filovirus ask "..."`.
 - **Cost:** a few cents per question.
 - **Graph description:** `filovirus ask --show-schema` prints what Claude is
   given. It is generated from the live graph, so it stays current.
+
+## Graph shape
+
+`filovirus graph-report` prints, per node type, the node count, isolated
+nodes, and mean and largest degree, then the biggest hubs. SerenQA prunes
+hubs before walking (Appendix D.3). The gene-family nodes are the largest by
+design: every protein of every filovirus points to one.
 
 ## Safety
 

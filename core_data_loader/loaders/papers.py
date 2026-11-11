@@ -30,6 +30,11 @@ FILES = [
 METADATA_FILEPATH = data_path("papers", "publication_metadata.csv")
 METADATA_TABLE = "papers_metadata"
 
+# Written by `filovirus fetch paper-citations`: (pmid, cited_pmid) pairs among
+# every candidate paper, from PubMed reference lists.
+CITATIONS_FILEPATH = data_path("papers", "paper_citations.csv")
+CITATIONS_TABLE = "papers_citations"
+
 
 def main():
     if not FOLDER.is_dir():
@@ -42,6 +47,8 @@ def main():
             batch.load(read_csv(FOLDER / fname), table, FOLDER / fname)
         batch.load_optional(METADATA_FILEPATH, METADATA_TABLE,
                             "run `filovirus fetch publication-metadata` to give papers titles and dates")
+        batch.load_optional(CITATIONS_FILEPATH, CITATIONS_TABLE,
+                            "run `filovirus fetch paper-citations` to add paper -> paper citations")
     print("Finished loading papers files.")
 
 

@@ -55,6 +55,7 @@ WITH checks AS (
      OR (entity_type='patent'      AND NOT EXISTS (SELECT 1 FROM core.patent      t WHERE t.patent_id::text      = el.entity_id))
      OR (entity_type='symptom'     AND NOT EXISTS (SELECT 1 FROM core.symptom     t WHERE t.symptom_id::text     = el.entity_id))
      OR (entity_type='assay_type'  AND NOT EXISTS (SELECT 1 FROM core.assay_type  t WHERE t.assay_type_id::text  = el.entity_id))
+     OR (entity_type='countermeasure' AND NOT EXISTS (SELECT 1 FROM core.countermeasure t WHERE t.countermeasure_id::text = el.entity_id))
 
   UNION ALL
   SELECT 'evidence_link -> missing document', count(*),
@@ -134,6 +135,21 @@ WITH checks AS (
   FROM core.protein
 
   UNION ALL
+  -- Countermeasures and organizations: empty means a step was skipped.
+  SELECT 'countermeasures missing their targets',
+         count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM core.countermeasure_taxon t
+                                            WHERE t.countermeasure_id = c.countermeasure_id)),
+         'rerun etl.countermeasure (etl.bvbrc_hfv rebuilds core.taxon, which cascades its links away)'
+  FROM core.countermeasure c
+
+  UNION ALL
+  SELECT 'grants with no organization',
+         count(*) FILTER (WHERE org_name IS NOT NULL AND NOT EXISTS (
+             SELECT 1 FROM core.grant_award_organization o WHERE o.grant_award_id = g.grant_award_id)),
+         'a grant recipient was not turned into an organization -- see curated/organizations.py'
+  FROM core.grant_award g
+
+  UNION ALL
   -- 4. Curated tables that go stale silently --------------------------------
   -- core.condition is truncated and rebuilt by etl.immport, cascading into
   -- core.taxon_condition; core.gene is rebuilt by etl.ucsc, which strands
@@ -189,6 +205,24 @@ WITH checks AS (
   -- empty string. write_core() normalises those to NULL; a column written by
   -- some other path can still reintroduce them, and the damage is invisible --
   -- `WHERE product IS NULL` simply stops finding the blank rows.
+  -- Document text is cleaned on the way in (db_utils.clean_text): an undecoded
+  -- '&#946;' hides 'β' from readers and from the keyword matcher.
+  SELECT 'undecoded HTML entities in document text', count(*),
+         'a title or abstract still holds &#NNN; / &amp; -- route it through clean_text'
+  FROM (SELECT project_title || ' ' || coalesce(abstract_text, '') AS t FROM core.grant_funding
+        UNION ALL SELECT coalesce(title, '') || ' ' || coalesce(abstract, '') FROM core.publication
+        UNION ALL SELECT coalesce(title, '') || ' ' || coalesce(abstract, '') FROM core.patent) d
+  WHERE t ~ '&(#[0-9]+|amp|lt|gt|quot);'
+
+  UNION ALL
+  SELECT 'control characters in document text', count(*),
+         'a title or abstract holds a control character -- route it through clean_text'
+  FROM (SELECT project_title || ' ' || coalesce(abstract_text, '') AS t FROM core.grant_funding
+        UNION ALL SELECT coalesce(title, '') || ' ' || coalesce(abstract, '') FROM core.publication
+        UNION ALL SELECT coalesce(title, '') || ' ' || coalesce(abstract, '') FROM core.patent) d
+  WHERE t ~ '[\x01-\x08\x0b\x0c\x0e-\x1f]'
+
+  UNION ALL
   SELECT 'empty strings in core.condition', count(*),
          'a blank condition name stored as an empty string instead of NULL'
   FROM core.condition WHERE condition_reported = '' OR condition_preferred = ''

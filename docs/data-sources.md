@@ -52,7 +52,8 @@ Run these once and keep the CSVs. Everything after them works offline.
 | `cited-publications` | `grants/cited_publications.csv` | PubMed records for those cited papers; the build keeps the ~1,270 filovirus ones. Run after `grant-publications` |
 | `publication-metadata` | `papers/publication_metadata.csv` | titles and years for the papers bundle. Without it, papers are labelled `PMID 123` and undated |
 | `patent-citations` | `patents/patent_cited_publications.csv` | patents' free-text references, resolved to PubMed and verified. All resolved papers are kept |
-| `patent-details` | `patents/patent_details.csv` | each patent's abstract and publication/filing/priority dates, from its Google Patents page (`robots.txt` allows `/patent/`; one request every 2 s). Abstracts are keyword-matched like grant abstracts, and the dates fill gaps the USPTO export left |
+| `patent-details` | `patents/patent_details.csv` | each patent's abstract, publication/filing/priority dates, patent-to-patent citations and statement of government interest (which grants funded it), from its Google Patents page (`robots.txt` allows `/patent/`; one request every 2 s). Abstracts are keyword-matched like grant abstracts, and the dates fill gaps the USPTO export left |
+| `paper-citations` | `papers/paper_citations.csv` | which candidate papers cite which, from PubMed reference lists. Run after the other fetchers, since it reads their CSVs |
 
 Set `NCBI_EMAIL` before running the PubMed fetchers. NCBI asks automated
 clients to send a contact address with their requests.
