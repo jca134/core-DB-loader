@@ -6,7 +6,7 @@ to the entities it is about, in one polymorphic table: `core.evidence_link`
 
 | Relation | From → to | Built from |
 | --- | --- | --- |
-| `related` | grant / patent → taxon, gene, condition, symptom, assay type, antibody | keywords in titles and abstracts (`kg_keywords.csv`), plus the CPC search a patent came from |
+| `related` | grant / patent → taxon, gene, condition, symptom, assay type, antibody | keywords in titles and abstracts (`kg_keywords.csv`), plus the CPC search a patent came from. Patent abstracts come from `filovirus fetch patent-details` |
 | `claims` | patent → gene | a gene product named in the patent title |
 | `describes` / `related` | paper → epitope, structure, antibody, feature, isolate, study | the papers bundle's exact source identifiers |
 | `cites` | grant / patent → paper | NIH RePORTER and PubMed grant acknowledgements; patents' resolved references |

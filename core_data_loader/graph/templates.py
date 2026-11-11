@@ -35,7 +35,10 @@ VIRUS_IDS = {key: ids for key, _label, ids in VIRUSES}
 # Dropdown sources for each parameter type. 'virus' is the curated list above.
 OPTION_QUERIES = {
     "gene": "MATCH (g:Gene) RETURN g.gene_symbol AS value, g.gene_symbol AS label ORDER BY label",
-    "condition": "MATCH (c:Condition) WHERE c.name <> '' RETURN c.condition_id AS value, c.name AS label ORDER BY label",
+    "gene_family": "MATCH (f:GeneFamily) RETURN f.symbol AS value, f.name AS label ORDER BY f.gene_family_id",
+    # Ontology-backed only: ImmPort also files a vaccine trial name as a "condition".
+    "condition": "MATCH (c:Condition) WHERE c.ontology_id IS NOT NULL "
+                 "RETURN c.condition_id AS value, c.name AS label ORDER BY label",
     "symptom": "MATCH (s:Symptom) RETURN s.symptom_id AS value, s.name AS label ORDER BY label",
     "assay_type": "MATCH (a:AssayType) RETURN a.assay_type_id AS value, a.name AS label ORDER BY label",
 }
@@ -138,6 +141,35 @@ RETURN p.title AS Patent, p.document_id AS Number, p.assignee AS Assignee,
        coalesce(p.date_published, p.filing_date) AS Date, r.confidence AS Confidence,
        {_PATENT_LINK} AS Link
 ORDER BY Date DESC""",
+    },
+    {
+        "id": "epitopes_by_virus_for_family", "group": "Genes and antibodies",
+        "question": "Which viruses have mapped epitopes on their {gene_family} protein?",
+        "params": [{"name": "gene_family", "type": "gene_family"}],
+        "cypher": """MATCH (f:GeneFamily {symbol: $gene_family})<-[:IN_FAMILY]-(p:Protein)<-[:ON_PROTEIN]-(e:Epitope)
+MATCH (e)-[:OF_TAXON]->(t:Taxon)
+RETURN t.name AS Virus, count(DISTINCT e) AS Epitopes, count(DISTINCT p) AS Proteins
+ORDER BY Epitopes DESC""",
+    },
+    {
+        "id": "documents_for_family", "group": "Genes and antibodies",
+        "question": "Which grants, patents and papers concern the {gene_family} gene, in any filovirus?",
+        "params": [{"name": "gene_family", "type": "gene_family"}],
+        "cypher": f"""MATCH (f:GeneFamily {{symbol: $gene_family}})
+CALL (f) {{
+  MATCH (g:Grant)-[r:RELATED]->(:Gene)-[:IN_FAMILY]->(f)
+  RETURN 'Grant' AS Type, g.project_title AS Title, g.last_fiscal_year AS Year, max(r.confidence) AS Confidence,
+         null AS Link
+  UNION ALL
+  MATCH (p:Patent)-[r:CLAIMS|RELATED]->(:Gene)-[:IN_FAMILY]->(f)
+  RETURN 'Patent' AS Type, p.title AS Title, coalesce(p.date_published, p.filing_date).year AS Year,
+         max(r.confidence) AS Confidence, {_PATENT_LINK} AS Link
+  UNION ALL
+  MATCH (pub:Publication)-[r:DESCRIBES]->(x)-[:ON_PROTEIN|OF_PROTEIN]->(:Protein)-[:IN_FAMILY]->(f)
+  RETURN 'Paper' AS Type, pub.title AS Title, toInteger(pub.year) AS Year, max(r.confidence) AS Confidence,
+         pub.url AS Link
+}}
+RETURN Type, Title, Year, Confidence, Link ORDER BY Confidence DESC, Year DESC LIMIT 200""",
     },
     # --- clinical -------------------------------------------------------------
     {

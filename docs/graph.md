@@ -30,6 +30,11 @@ password anywhere the database is reachable by anyone else.
 - **Foreign keys and join tables** become relationships: `CHILD_OF`,
   `OF_TAXON`, `ON_PROTEIN`, `BINDS`, `TARGETS`, `CAUSES`, ... `CAUSES` is
   already inherited down to every strain.
+- **Gene families.** `Gene` holds Ebola's reference genes only. To cross
+  viruses, go through `GeneFamily`: every protein of every filovirus, and
+  every `Gene`, has `IN_FAMILY` to one of seven families. That bridge is how a
+  Marburg epitope reaches the grants and patents about GP:
+  `(:Epitope)-[:ON_PROTEIN]->(:Protein)-[:IN_FAMILY]->(:GeneFamily)<-[:IN_FAMILY]-(:Gene)<-[:RELATED]-(:Grant)`.
 - **Evidence links** become `RELATED`, `CITES`, `CLAIMS` and `DESCRIBES`
   relationships, carrying `confidence`, `matched_terms` and `support_count`.
 - **Left out:** raw sequence strings and the lineage tables stay in Postgres.

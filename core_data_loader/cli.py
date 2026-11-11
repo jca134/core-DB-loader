@@ -6,6 +6,7 @@
     filovirus fetch NAME ...          network lookups that write extra CSVs into data/
     filovirus build                   raw.* -> core.*, then the data-quality checks
     filovirus check                   only the data-quality checks
+    filovirus compare OTHER_DB        compare contents with another build, table by table
     filovirus export                  core.* -> Neo4j (wipes and rebuilds the graph)
     filovirus serve                   the query page, http://localhost:8765
     filovirus ask "QUESTION"          one plain-English question (needs an API key)
@@ -45,6 +46,8 @@ FETCHERS = {
                              "PubMed: titles and years for the papers bundle"),
     "patent-citations": ("core_data_loader.fetchers.patent_cited_publications",
                          "PubMed: resolve patents' free-text references to PMIDs"),
+    "patent-details": ("core_data_loader.fetchers.patent_details",
+                       "Google Patents: abstracts and publication/filing dates"),
 }
 
 
@@ -100,6 +103,11 @@ def cmd_build(args) -> int:
 def cmd_check(_args) -> int:
     from core_data_loader.etl.pipeline import check
     return check()
+
+
+def cmd_compare(args) -> int:
+    from core_data_loader.etl.compare import compare
+    return compare(args.other)
 
 
 def cmd_export(_args) -> int:
@@ -159,6 +167,10 @@ def parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_build)
 
     sub.add_parser("check", help="run the data-quality checks (sql/checks.sql)").set_defaults(func=cmd_check)
+    s = sub.add_parser("compare", help="compare this database's contents with another build, table by table")
+    s.add_argument("other", help="database name on the same server (e.g. filovirus_test), or a full URL")
+    s.set_defaults(func=cmd_compare)
+
     sub.add_parser("export", help="rebuild the Neo4j graph from core.*").set_defaults(func=cmd_export)
 
     s = sub.add_parser("serve", help="run the query page (http://localhost:8765)")

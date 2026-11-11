@@ -85,3 +85,23 @@ def test_errata_and_non_literature_are_recognised():
     assert not ERRATUM_RE.match("Ebola virus entry requires NPC1")
     assert NOT_A_PAPER_RE.search("GenBank Accession No. AF086833")
     assert not NOT_A_PAPER_RE.search("Marzi et al., Science, April 2015, 348(6233):439-442")
+
+
+# --- patent details (Google Patents page) ----------------------------------------
+
+def test_patent_page_metadata_is_read_from_tags_not_layout():
+    from core_data_loader.fetchers.patent_details import compact_number, parse_page
+    page = """<html><head>
+      <meta name="DC.description" content="  An antibody that binds a
+         filovirus &amp; neutralizes it. ">
+    </head><body>
+      <time itemprop="priorityDate" datetime="2015-02-19">
+      <time itemprop="filingDate" datetime="2016-02-19">
+      <time itemprop="publicationDate" datetime="2018-02-01">
+      <time itemprop="publicationDate" datetime="2025-05-27"><!-- a citing patent -->
+    </body></html>"""
+    assert parse_page(page) == {
+        "publication_date": "2018-02-01", "filing_date": "2016-02-19", "priority_date": "2015-02-19",
+        "abstract": "An antibody that binds a filovirus & neutralizes it.",
+    }
+    assert compact_number("US 20180030118 A1") == "US20180030118A1"

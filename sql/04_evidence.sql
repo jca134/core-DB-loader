@@ -115,6 +115,13 @@ CREATE TABLE IF NOT EXISTS core.patent (
     source_id        INTEGER NOT NULL REFERENCES core.source(source_id)
 );
 
+-- Filled from each patent's Google Patents page (`filovirus fetch
+-- patent-details`): the USPTO exports carry no abstract, and the expanded
+-- search's patents had no dates. Added after the table, so existing
+-- databases pick them up from a plain rerun of this file.
+ALTER TABLE core.patent ADD COLUMN IF NOT EXISTS priority_date DATE;
+ALTER TABLE core.patent ADD COLUMN IF NOT EXISTS abstract TEXT;
+
 CREATE TABLE IF NOT EXISTS core.patent_cpc (
     patent_cpc_id BIGSERIAL PRIMARY KEY,
     patent_id     BIGINT NOT NULL REFERENCES core.patent(patent_id) ON DELETE CASCADE,

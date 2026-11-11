@@ -121,6 +121,19 @@ WITH checks AS (
                     WHERE p.core_table='isolate' AND p.core_pk = i.isolate_id::text)
 
   UNION ALL
+  -- Gene families: every reference gene must have one, and proteins lose
+  -- theirs whenever etl.bvbrc_hfv rebuilds core.protein.
+  SELECT 'reference gene with no gene family', count(*),
+         'rerun etl.gene_family, or add the symbol to curated/gene_families.py'
+  FROM core.gene WHERE gene_family_id IS NULL
+
+  UNION ALL
+  SELECT 'protein gene families unassigned',
+         CASE WHEN count(*) > 0 AND count(gene_family_id) = 0 THEN 1 ELSE 0 END,
+         'rerun etl.gene_family (etl.bvbrc_hfv rebuilds core.protein)'
+  FROM core.protein
+
+  UNION ALL
   -- 4. Curated tables that go stale silently --------------------------------
   -- core.condition is truncated and rebuilt by etl.immport, cascading into
   -- core.taxon_condition; core.gene is rebuilt by etl.ucsc, which strands
@@ -176,6 +189,11 @@ WITH checks AS (
   -- empty string. write_core() normalises those to NULL; a column written by
   -- some other path can still reintroduce them, and the damage is invisible --
   -- `WHERE product IS NULL` simply stops finding the blank rows.
+  SELECT 'empty strings in core.condition', count(*),
+         'a blank condition name stored as an empty string instead of NULL'
+  FROM core.condition WHERE condition_reported = '' OR condition_preferred = ''
+
+  UNION ALL
   SELECT 'empty strings in core.feature.product', count(*),
          'a blank stored as an empty string instead of NULL'
   FROM core.feature WHERE product = ''

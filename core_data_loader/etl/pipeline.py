@@ -12,6 +12,8 @@ database that looks fine and is quietly wrong:
     core.gene_domain, so etl.ucsc has to follow it.
   * etl.bvbrc_hfv also rebuilds core.antibody_epitope, so etl.antibody_target
     has to follow it.
+  * etl.bvbrc_hfv and etl.ucsc rebuild core.protein and core.gene, dropping
+    their gene-family assignments, so etl.gene_family has to follow both.
   * etl.immport truncates core.condition, which CASCADEs into
     core.taxon_condition, so etl.taxon_condition has to follow it.
   * etl.bvbrc_hfv truncates core.isolate and core.epitope_assay, and
@@ -49,6 +51,8 @@ STEPS = [
      "clinical core: studies, subjects, biosamples, conditions"),
     ("core_data_loader.etl.ucsc",
      "reference gene model — after etl.bvbrc_hfv, which cascades core.gene away"),
+    ("core_data_loader.etl.gene_family",
+     "filovirus gene families — after etl.bvbrc_hfv and etl.ucsc, which rebuild core.protein and core.gene"),
     ("core_data_loader.etl.taxon_condition",
      "curated taxon→disease — after etl.immport, which cascades core.taxon_condition away"),
     ("core_data_loader.etl.antibody_target",

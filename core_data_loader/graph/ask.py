@@ -58,7 +58,13 @@ Conventions in this graph:
   ambiguous term) and `matched_terms`. Mention confidence when it is below 0.7.
 - External ids are list properties: xref_genbank_accession, xref_ncbi_protein_id,
   xref_pubmed_id, xref_nih_core_project_num, ... -- query with 'X' IN n.xref_...
-- Core genes are the 9 Ebola genes (NP, VP35, VP40, GP, VP30, VP24, L, ...).
+- (:Gene) is the Ebola reference gene model only (NP, VP35, VP40, GP, sGP, ssGP,
+  VP30, VP24, L). For any other filovirus, go through (:GeneFamily): every
+  protein of every filovirus and every Gene has [:IN_FAMILY] to one of seven
+  families (symbol 'NP', 'VP35', 'VP40', 'GP', 'VP30', 'VP24', 'L'). Which virus
+  a protein belongs to: (p:Protein)-[:ENCODED_BY]->(:Feature)-[:ON_SEQUENCE]->
+  (:Sequence)-[:FROM_ISOLATE]->(:Isolate)-[:OF_TAXON]->(:Taxon), or via an
+  epitope's or structure's own [:OF_TAXON].
 - Always LIMIT exploratory queries; count(*) before listing large sets.
 
 When you answer: lead with the direct answer, then the supporting rows (as a

@@ -194,6 +194,12 @@ def main():
     # condition / study_condition
     s2c = concat_tables("study_2_condition_or_disease", source_ids)
     if not s2c.empty:
+        # Blank -> NULL up front, on the frame every later step reads, so the
+        # stored row and the lookup key agree (pandas matches null to null).
+        # Written directly rather than through write_core, these columns once
+        # kept '' -- a condition with condition_preferred = '' had an empty name.
+        name_cols = ["condition_reported", "condition_preferred"]
+        s2c[name_cols] = s2c[name_cols].replace("", None)
         # Keep _raw_table/_source_id alongside the first raw row for each
         # distinct (condition_reported, condition_preferred) pair, so that
         # row can be traced back to its raw source after the condition_id
