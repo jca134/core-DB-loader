@@ -22,7 +22,8 @@ brew services start neo4j
 uv run python -m core_data_loader.export.export_neo4j
 
 # 3a. Ask questions in plain English -> open http://localhost:8765
-export ANTHROPIC_API_KEY=sk-ant-...
+#     Replace the placeholder with your real key (console.anthropic.com -> API Keys)
+export ANTHROPIC_API_KEY='sk-ant-api03-YOUR-KEY-HERE'
 uv run python -m core_data_loader.query.ask_graph --serve
 
 # 3b. ...or one question from the terminal
@@ -281,7 +282,7 @@ It needs an Anthropic API key (from <https://console.anthropic.com>), exported
 as `ANTHROPIC_API_KEY`. Each question costs a few cents.
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_API_KEY='sk-ant-api03-YOUR-KEY-HERE'
 uv run python -m core_data_loader.query.ask_graph "Which antibodies target GP?"
 uv run python -m core_data_loader.query.ask_graph --serve   # web page at http://localhost:8765
 ```

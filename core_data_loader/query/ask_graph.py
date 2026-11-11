@@ -237,9 +237,19 @@ def main():
     try:
         client = anthropic.Anthropic()
         client.models.retrieve(MODEL)
-    except (TypeError, anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
+    except TypeError:
         graph.close()
-        sys.exit(f"No usable Anthropic API key ({type(e).__name__}): set ANTHROPIC_API_KEY (see README).")
+        sys.exit("No Anthropic API key found. Run: export ANTHROPIC_API_KEY='sk-ant-api03-...' "
+                 "with your real key from https://console.anthropic.com (see README).")
+    except anthropic.AuthenticationError:
+        graph.close()
+        sys.exit("Anthropic rejected ANTHROPIC_API_KEY. Is it the real key (not the README's "
+                 "'sk-ant-...' placeholder), copied whole, and not revoked? Create one at "
+                 "https://console.anthropic.com -> API Keys.")
+    except anthropic.PermissionDeniedError:
+        graph.close()
+        sys.exit(f"The API key works but has no access to {MODEL}; check billing / credit "
+                 "at https://console.anthropic.com.")
     try:
         if args.serve:
             serve(args.port, graph, client, system)
