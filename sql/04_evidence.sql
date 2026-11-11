@@ -134,7 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_patent_cpc_code ON core.patent_cpc(cpc_code);
 ALTER TABLE core.publication ADD COLUMN IF NOT EXISTS url       TEXT;
 ALTER TABLE core.publication ADD COLUMN IF NOT EXISTS source_id INTEGER REFERENCES core.source(source_id);
 -- Filled for papers reached through a grant's citation list
--- (fetch_cited_publications.py): the relevance filter reads them, and they are
+-- (fetchers/cited_publications.py): the relevance filter reads them, and they are
 -- the text any document-similarity comparison needs. NULL for the papers
 -- workstream's own 300 until their abstracts are fetched too.
 ALTER TABLE core.publication ADD COLUMN IF NOT EXISTS abstract   TEXT;
@@ -278,7 +278,7 @@ DROP VIEW IF EXISTS core.v_evidence_cooccurrence;
 
 -- ===========================================================================
 -- 7. Orphan check: evidence_link rows whose entity_id doesn't exist.
---    Should return 0 rows; etl_evidence.py runs this and prints the count.
+--    Should return 0 rows; etl/evidence.py runs this and prints the count.
 -- ===========================================================================
 -- SELECT el.* FROM core.evidence_link el
 -- WHERE (el.entity_type = 'taxon'     AND NOT EXISTS (SELECT 1 FROM core.taxon     t WHERE t.taxon_id::text     = el.entity_id))

@@ -1,13 +1,19 @@
 """
 The Neo4j export's mapping is data (NODES, EDGES, EVIDENCE_LABELS); these
 catch a typo in it before a run does. The row-count comparison in
-export_neo4j.main() covers the rest against a live database.
+graph/export.py main() covers the rest against a live database.
 """
 
 from datetime import date
 from decimal import Decimal
 
-from core_data_loader.export.export_neo4j import EDGES, EVIDENCE_LABELS, LABEL_KEY, NODES, _props
+from core_data_loader.graph.export import (
+    EDGES,
+    EVIDENCE_LABELS,
+    LABEL_KEY,
+    NODES,
+    _props,
+)
 
 
 def test_every_edge_endpoint_is_a_node_label():

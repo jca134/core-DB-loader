@@ -1,6 +1,6 @@
 """
 Regression tests for the BV-BRC feature/protein merge in
-core_data_loader.etl.etl_bvbrc_hfv.
+core_data_loader.etl.bvbrc_hfv.
 
 BV-BRC's genome_feature.csv lists every feature twice, once per annotation
 pipeline, at identical coordinates:
@@ -17,7 +17,7 @@ real feature -- 65,838 redundant features, a third of core.feature.
 import pandas as pd
 import pytest
 
-from core_data_loader.etl.etl_bvbrc_hfv import BuildContext, build_features_and_proteins
+from core_data_loader.etl.bvbrc_hfv import BuildContext, build_features_and_proteins
 
 
 def _ctx(seq_map=None):
@@ -145,7 +145,7 @@ def test_non_coding_features_produce_no_protein():
 # separate them, and an earlier version of the key collapsed every unanchored
 # feature of one type into a single row across genomes.
 
-from core_data_loader.etl.etl_bvbrc_hfv import _pipeline_neutral_feature_id
+from core_data_loader.etl.bvbrc_hfv import _pipeline_neutral_feature_id
 
 
 def _blank_row(feature_id, annotation="PATRIC"):
@@ -189,7 +189,7 @@ def test_pipeline_neutral_feature_id(raw, expected):
 # BV-BRC joins one taxon per chain with "|" on a structure. safe_int() cannot
 # parse that, so all 53 antibody-antigen complexes lost their organism.
 
-from core_data_loader.etl.etl_bvbrc_hfv import resolve_taxon
+from core_data_loader.etl.bvbrc_hfv import resolve_taxon
 
 
 def _taxa_ctx(*present):

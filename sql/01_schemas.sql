@@ -1,5 +1,5 @@
 -- Top-level schemas for the filovirus integration database.
--- Run this first. "raw" already exists if load_bvbrc.py has run before.
+-- Run this first. "raw" already exists if loaders/bvbrc.py has run before.
 
 CREATE SCHEMA IF NOT EXISTS raw;
 CREATE SCHEMA IF NOT EXISTS core;

@@ -7,11 +7,18 @@ case is a trap found in the real data.
 
 import re
 
-from core_data_loader.etl.etl_evidence import DISEASE_NAME_RE, normalize_document_id, _family_id
-from core_data_loader.loaders.fetch_patent_cited_publications import (
-    ERRATUM_RE, NOT_A_PAPER_RE, _fold, title_score, title_segments,
+from core_data_loader.etl.evidence import (
+    DISEASE_NAME_RE,
+    _family_id,
+    normalize_document_id,
 )
-
+from core_data_loader.fetchers.patent_cited_publications import (
+    ERRATUM_RE,
+    NOT_A_PAPER_RE,
+    _fold,
+    title_score,
+    title_segments,
+)
 
 # --- patent ids -------------------------------------------------------------
 

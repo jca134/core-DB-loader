@@ -69,7 +69,7 @@ def pick_field(*candidates):
     (None, None) if every candidate is None.
 
     Exists because a merged row's single source_id can only name the row's
-    anchor source (see build_isolates_and_sequences in etl_bvbrc_hfv.py) --
+    anchor source (see build_isolates_and_sequences in etl/bvbrc_hfv.py) --
     this lets a caller record, per field, which source actually won it.
     """
     for source_id, value in candidates:

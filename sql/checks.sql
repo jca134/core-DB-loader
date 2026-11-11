@@ -122,12 +122,12 @@ WITH checks AS (
 
   UNION ALL
   -- 4. Curated tables that go stale silently --------------------------------
-  -- core.condition is truncated and rebuilt by etl_immport, cascading into
-  -- core.taxon_condition; core.gene is rebuilt by etl_ucsc, which strands
+  -- core.condition is truncated and rebuilt by etl.immport, cascading into
+  -- core.taxon_condition; core.gene is rebuilt by etl.ucsc, which strands
   -- antibody targets. Both are reseeded by their own ETL, and both are empty
   -- rather than wrong if that step is skipped.
   SELECT 'taxon_condition empty', CASE WHEN count(*) = 0 THEN 1 ELSE 0 END,
-         'rerun etl_taxon_condition (etl_immport truncates core.condition)'
+         'rerun etl.taxon_condition (etl.immport truncates core.condition)'
   FROM core.taxon_condition
 
   UNION ALL
@@ -137,21 +137,21 @@ WITH checks AS (
   SELECT 'isolate_symptom empty',
          CASE WHEN NOT EXISTS (SELECT 1 FROM core.isolate_symptom)
                AND to_regclass('raw.hfv_ebola_annotation_web') IS NOT NULL THEN 1 ELSE 0 END,
-         'rerun etl_clinical_vocab (etl_bvbrc_hfv truncates core.isolate)'
+         'rerun etl.clinical_vocab (etl.bvbrc_hfv truncates core.isolate)'
   UNION ALL
   SELECT 'experiment_assay_type empty',
          CASE WHEN NOT EXISTS (SELECT 1 FROM core.experiment_assay_type)
                AND EXISTS (SELECT 1 FROM core.experiment) THEN 1 ELSE 0 END,
-         'rerun etl_clinical_vocab (etl_immport truncates core.experiment)'
+         'rerun etl.clinical_vocab (etl.immport truncates core.experiment)'
   UNION ALL
   SELECT 'epitope_assay_assay_type empty',
          CASE WHEN NOT EXISTS (SELECT 1 FROM core.epitope_assay_assay_type)
                AND EXISTS (SELECT 1 FROM core.epitope_assay) THEN 1 ELSE 0 END,
-         'rerun etl_clinical_vocab (etl_bvbrc_hfv truncates core.epitope_assay)'
+         'rerun etl.clinical_vocab (etl.bvbrc_hfv truncates core.epitope_assay)'
 
   UNION ALL
   SELECT 'antibody targets unresolved', count(*),
-         'rerun etl_antibody_target (etl_bvbrc_hfv rebuilds antibody_epitope)'
+         'rerun etl.antibody_target (etl.bvbrc_hfv rebuilds antibody_epitope)'
   FROM core.antibody_epitope ae
   JOIN ops.entity_provenance p
     ON p.core_table='antibody' AND p.core_pk = ae.antibody_id::text
@@ -163,7 +163,7 @@ WITH checks AS (
   -- target_gene_symbol is a natural key, not a foreign key, so nothing stops it
   -- holding a symbol core.gene does not have. This is the check that would
   -- otherwise have been an FK constraint -- one that turned out to be unsafe,
-  -- because a real FK let etl_ucsc's TRUNCATE CASCADE empty this whole table.
+  -- because a real FK let etl.ucsc's TRUNCATE CASCADE empty this whole table.
   SELECT 'antibody target symbol not in core.gene', count(*),
          'target_gene_symbol holds a symbol with no matching core.gene row'
   FROM core.antibody_epitope ae
@@ -251,9 +251,9 @@ WITH checks AS (
   -- explicitly, so nextval() is never called and the sequence stays at 1.
   -- Nothing in the pipeline notices, because the pipeline never uses the
   -- default; the next ordinary INSERT does, takes an id that already exists,
-  -- and fails on the primary key. run_all.py resyncs them after every run.
+  -- and fails on the primary key. etl/pipeline.py resyncs them after every run.
   SELECT 'serial sequences behind their table', count(*),
-         'an ordinary INSERT would collide on the primary key -- rerun run_all'
+         'an ordinary INSERT would collide on the primary key -- rerun filovirus build'
   FROM (
       SELECT s.relname AS seq, t.relname AS tbl, a.attname AS col
       FROM pg_class s

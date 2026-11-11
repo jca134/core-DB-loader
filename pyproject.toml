@@ -1,7 +1,7 @@
 [project]
 name = "core-data-loader"
 version = "0.1.0"
-description = "Loaders and ETL scripts that ingest BV-BRC, HFV, ImmPort, NCBI, and UCSC filovirus data into a Postgres database."
+description = "Builds the filovirus (Ebola/Marburg) knowledge graph: source data -> Postgres -> Neo4j, with a query page."
 requires-python = ">=3.11"
 dependencies = [
     "pandas==3.0.5",
@@ -12,10 +12,24 @@ dependencies = [
     "anthropic>=2.8.0",
 ]
 
+[project.scripts]
+filovirus = "core_data_loader.cli:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.14",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["F", "I", "E9", "B006", "B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["hatchling"]

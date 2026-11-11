@@ -1,19 +1,12 @@
-import getpass
+"""The database engine and the value-parsing helpers every stage shares."""
+
 import hashlib
-import os
 import re
 from datetime import datetime
 
 from sqlalchemy import create_engine
 
-# Matches the README's documented default of
-# postgresql+psycopg2://$(whoami)@localhost:5432/filovirus -- resolved from
-# the current OS user rather than hardcoded, so this works for whoever's
-# running it, not just the machine it was written on.
-DB_URL = os.environ.get(
-    "FILOVIRUS_DB_URL",
-    f"postgresql+psycopg2://{getpass.getuser()}@localhost:5432/filovirus",
-)
+from core_data_loader.config import DB_URL
 
 engine = create_engine(DB_URL)
 

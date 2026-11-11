@@ -1,8 +1,8 @@
-"""Unit tests for LANL/HFV value parsing in etl_bvbrc_hfv."""
+"""Unit tests for LANL/HFV value parsing in etl.bvbrc_hfv."""
 
 import pandas as pd
 
-from core_data_loader.etl.etl_bvbrc_hfv import (
+from core_data_loader.etl.bvbrc_hfv import (
     BuildContext,
     build_antibodies,
     hfv_clean,
@@ -156,7 +156,7 @@ class TestBuildAntibodies:
 # The CTL file's `assay` column is a method and goes to
 # epitope_assay.assay_method; it used to be written into assay_outcome.
 
-from core_data_loader.etl.etl_bvbrc_hfv import ctl_assay_method
+from core_data_loader.etl.bvbrc_hfv import ctl_assay_method
 
 
 def test_ctl_assay_method_keeps_the_method_text():

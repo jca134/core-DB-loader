@@ -207,7 +207,7 @@ CREATE TABLE IF NOT EXISTS core.epitope_assay (
     assay_outcome    TEXT,             -- a result, e.g. BV-BRC's "positive/total" ("1/3")
     -- How the epitope was tested, e.g. LANL CTL's "IFNg ICC, lytic activity,
     -- EliSpot". Used to be written into assay_outcome, mixing methods and
-    -- results in one column. etl_clinical_vocab parses it into
+    -- results in one column. etl.clinical_vocab parses it into
     -- core.epitope_assay_assay_type.
     assay_method     TEXT,
     total_assays     INTEGER,
@@ -248,8 +248,8 @@ CREATE TABLE IF NOT EXISTS core.antibody_epitope (
 -- epitope_id exists for only 126 of the rows.
 --
 -- The SYMBOL, not core.gene.gene_id, and deliberately so. gene_id is a
--- surrogate that etl_ucsc regenerates on every run, and a real FK to it made
--- core.antibody_epitope a dependent of core.gene -- so etl_ucsc's
+-- surrogate that etl.ucsc regenerates on every run, and a real FK to it made
+-- core.antibody_epitope a dependent of core.gene -- so etl.ucsc's
 -- `TRUNCATE core.gene CASCADE` emptied all 149 rows, destroying the
 -- antibody-to-epitope links as collateral. A stable natural key cannot be
 -- invalidated that way, and joining `ON g.gene_symbol = ae.target_gene_symbol`
@@ -381,7 +381,7 @@ CREATE TABLE IF NOT EXISTS core.study_condition (
 -- causes (e.g. Zaire ebolavirus 186538 -> Ebola hemorrhagic fever DOID:4325).
 -- Unlike every other core.* table, this isn't derived from a raw.* source --
 -- it's populated by core_data_loader.common.taxon_conditions after both
--- core.taxon and core.condition already have rows (see etl_taxon_condition.py).
+-- core.taxon and core.condition already have rows (see etl/taxon_condition.py).
 CREATE TABLE IF NOT EXISTS core.taxon_condition (
     taxon_id     INTEGER NOT NULL REFERENCES core.taxon(taxon_id),
     condition_id BIGINT NOT NULL REFERENCES core.condition(condition_id),
@@ -501,7 +501,7 @@ CREATE INDEX IF NOT EXISTS idx_antibody_epitope_antibody ON core.antibody_epitop
 -- Reverse-direction lookups. The indexes above cover each FK's "parent -> child"
 -- side; these cover the traversals that actually get run: finding an entity by
 -- its accession (xref_type/xref_value, not entity_id -- see resolve_sequence_id
--- in etl_ucsc.py), walking epitope -> antibody, and epitope -> taxon -> condition.
+-- in etl/ucsc.py), walking epitope -> antibody, and epitope -> taxon -> condition.
 CREATE INDEX IF NOT EXISTS idx_xref_type_value ON core.xref(xref_type, xref_value);
 CREATE INDEX IF NOT EXISTS idx_antibody_epitope_epitope ON core.antibody_epitope(epitope_id);
 CREATE INDEX IF NOT EXISTS idx_epitope_taxon ON core.epitope(taxon_id);

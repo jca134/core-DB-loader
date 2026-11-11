@@ -3,7 +3,15 @@
 import pandas as pd
 from sqlalchemy import text
 
-from core_data_loader.common.db_utils import engine, blank_to_none, safe_int, safe_float, safe_date, safe_year, clean_columns
+from core_data_loader.common.db_utils import (
+    blank_to_none,
+    clean_columns,
+    engine,
+    safe_date,
+    safe_float,
+    safe_int,
+    safe_year,
+)
 from core_data_loader.common.sources import SOURCES, ensure_sources
 
 # Re-exported for etl_*.py, which imports its db_utils/sources helpers
@@ -192,9 +200,9 @@ def add_provenance_bulk(provenance_rows: list, df: pd.DataFrame, core_table: str
                          source_id_col: str = "_source_id"):
     """
     Same as add_provenance, but derives one row per row of df instead of one
-    call per entity — for the etl_immport.py style of building a core table
+    call per entity — for the etl/immport.py style of building a core table
     as a single vectorized DataFrame rather than an itertuples loop. df must
-    carry raw_table_col/source_id_col (see etl_immport.concat_tables), since
+    carry raw_table_col/source_id_col (see etl.immport.concat_tables), since
     a core DataFrame assembled across studies needs a different raw_table
     per row, not one value for the whole call.
     """
@@ -212,8 +220,8 @@ def write_provenance(provenance_rows: list, core_tables: list, shared_tables: di
     Replace the lineage rows for `core_tables`, which this ETL owns outright.
 
     `shared_tables` is for a core table two ETLs both write to -- currently only
-    core.publication, which etl_immport populates from its studies and
-    etl_evidence upserts papers onto. Deleting by core_table alone would make
+    core.publication, which etl.immport populates from its studies and
+    etl.evidence upserts papers onto. Deleting by core_table alone would make
     each script wipe the other's lineage, and not deleting at all would
     accumulate a fresh copy on every rerun. So it maps a table name to the
     source_ids this ETL is responsible for, and only those rows are replaced:
