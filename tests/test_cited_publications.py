@@ -6,8 +6,8 @@ No network, no database.
 
 import xml.etree.ElementTree as ET
 
-from core_data_loader.etl.etl_evidence import is_filovirus_paper
-from core_data_loader.loaders.fetch_cited_publications import parse_article
+from core_data_loader.etl.evidence import is_filovirus_paper
+from core_data_loader.fetchers.pubmed import parse_article
 
 ARTICLE = """
 <PubmedArticle>

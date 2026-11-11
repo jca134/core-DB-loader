@@ -1,6 +1,6 @@
 """
 Unit tests for core_data_loader.common.accessions -- the accession-matching
-and BV-BRC reload-dedup logic that etl_bvbrc_hfv.py's cross-source and
+and BV-BRC reload-dedup logic that etl/bvbrc_hfv.py's cross-source and
 BV-BRC-internal isolate/sequence merges depend on.
 
 Deliberately dependency-free (no pandas, no live database): every case here
@@ -8,7 +8,11 @@ was previously only checkable by running the full ETL against the real
 filovirus DB and hand-inspecting row counts.
 """
 
-from core_data_loader.common.accessions import base_accession, resolve_bvbrc_duplicate_genomes, pick_field
+from core_data_loader.common.accessions import (
+    base_accession,
+    pick_field,
+    resolve_bvbrc_duplicate_genomes,
+)
 
 
 class TestBaseAccession:

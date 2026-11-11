@@ -10,14 +10,14 @@
 -- papers -- can all point at the same node.
 --
 -- Both vocabularies are curated, not inferred: seeded from
--- core_data_loader/common/clinical_vocab.py (same pattern as core.source and
+-- core_data_loader/curated/clinical_vocab.py (same pattern as core.source and
 -- core.taxon_condition), and limited to the terms the loaded data actually
 -- uses. Ids are upserted on name, so they stay stable across reruns; the
 -- ontology id (HPO / OBI) is the identifier to hand to anyone outside this DB.
 --
--- The link tables are rebuilt by etl_clinical_vocab.py and hold FKs to rows
+-- The link tables are rebuilt by etl/clinical_vocab.py and hold FKs to rows
 -- that other ETLs truncate (core.isolate, core.experiment, core.epitope_assay),
--- so those truncates CASCADE them away. run_all.py runs etl_clinical_vocab
+-- so those truncates CASCADE them away. etl/pipeline.py runs etl.clinical_vocab
 -- after all three, and sql/checks.sql flags an emptied link table.
 
 CREATE TABLE IF NOT EXISTS core.symptom (

@@ -1,15 +1,19 @@
+# Environment and tooling
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
 .DS_Store
-
 .idea/
+.claude/
 
-# CSVs (raw source data and generated profiling output) are not versioned.
+# Source data is downloaded or shared separately, never versioned (see README).
+data/
 *.csv
 
-# Source data downloads and the SerenQA overview doc — not versioned.
-data/
-Overview/
+# Team planning documents and the SerenQA paper.
+overview/
+
+# Someone else's RDF export work-in-progress; not part of the pipeline.
 exports/
-.claude/

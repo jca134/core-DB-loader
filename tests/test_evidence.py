@@ -2,20 +2,27 @@
 Regression tests for the evidence layer's pure logic -- the parts that decide
 how a grant is grouped, how relevant it is, and what a keyword match means.
 Nothing here touches the database; the resolution steps that do are exercised
-by running etl_evidence.py against the live DB.
+by running etl/evidence.py against the live DB.
 """
 
 import pandas as pd
 import pytest
 
 from core_data_loader.common.kg_keywords import (
+    AMBIGUOUS_PENALTY,
+    CONFIDENCE,
     SUPPLEMENTAL_TERMS,
-    CONFIDENCE, AMBIGUOUS_PENALTY, KeywordMatcher, _match_method, _word_boundary_pattern,
+    KeywordMatcher,
+    _match_method,
+    _word_boundary_pattern,
 )
-from core_data_loader.etl.etl_evidence import (
-    award_key, relevance_tier, contact_pi, organism_context_established, keep_hit,
+from core_data_loader.etl.evidence import (
+    award_key,
+    contact_pi,
+    keep_hit,
+    organism_context_established,
+    relevance_tier,
 )
-
 
 # --- award_key ------------------------------------------------------------
 # RePORTER truncates contract core numbers to 11 characters, merging distinct

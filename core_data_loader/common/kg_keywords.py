@@ -24,7 +24,7 @@ has ~64k accession-keyed rows, so "this patent is about GP" would otherwise
 become 300 near-identical links; core.gene is UCSC's single authoritative
 model, one row per gene, which is the granularity the claim is actually about.
 The gene symbol is stable even though gene_id is not, so resolution happens at
-ETL time and etl_evidence must rerun after etl_ucsc.
+ETL time and etl.evidence must rerun after etl.ucsc.
 """
 
 import os
@@ -33,15 +33,10 @@ import re
 import pandas as pd
 from sqlalchemy import text
 
-from core_data_loader.common.db_utils import engine, blank_to_none
+from core_data_loader.common.db_utils import blank_to_none, engine
+from core_data_loader.config import KG_KEYWORDS_CANDIDATES
 
-# Exported from the live DB; identical in overview/Context/ and exports/ apart
-# from a BOM. Both are git-ignored, so the path is a constant rather than a CLI
-# argument -- if it moves, change it here.
-KEYWORDS_PATH = "overview/Context/kg_keywords.csv"
-FALLBACK_PATH = "exports/kg_keywords.csv"
-
-# Confidence written to core.evidence_link, and from there to core.kg_edge.weight.
+# Confidence written to core.evidence_link, and from there to the Neo4j relationship.
 # An exact identifier is ground truth; a keyword in a title is a stronger signal
 # than one buried in an abstract; the search a patent file came from is weaker
 # still, since it is metadata about the query rather than text in the record.
@@ -62,7 +57,7 @@ AMBIGUOUS_PENALTY = 0.5
 # Curated additions to the exported vocabulary, hand-seeded here rather than
 # edited into kg_keywords.csv -- that file is generated from the live DB, so a
 # manual edit would be silently lost on the next export. Same pattern as
-# common/taxon_conditions.py: domain knowledge lives in code.
+# curated/taxon_conditions.py: domain knowledge lives in code.
 #
 # WHY THESE EXIST. kg_keywords carries the formal names ("Ebola virus",
 # "Orthoebolavirus zairense") but not the shorthand researchers actually write.
@@ -97,14 +92,14 @@ SUPPLEMENTAL_TERMS = [
 def load_keywords(path: str = None) -> pd.DataFrame:
     """The `include`-scope rows of kg_keywords.csv, one per search term."""
     if path is None:
-        path = KEYWORDS_PATH if os.path.exists(KEYWORDS_PATH) else FALLBACK_PATH
-    if not os.path.exists(path):
+        path = next((p for p in KG_KEYWORDS_CANDIDATES if p.exists()), None)
+    if path is None or not os.path.exists(path):
         raise FileNotFoundError(
-            f"KG keyword vocabulary not found at {KEYWORDS_PATH} or {FALLBACK_PATH}. "
-            "It is exported from the live DB by hand; see kg_keywords_README.md."
+            "KG keyword vocabulary (kg_keywords.csv) not found. Put it at "
+            f"{KG_KEYWORDS_CANDIDATES[0]}; see kg_keywords_README.md beside it."
         )
-    # utf-8-sig: the exports/ copy carries a BOM, which would otherwise end up
-    # inside the first column name.
+    # utf-8-sig: some copies carry a BOM, which would otherwise end up inside
+    # the first column name.
     df = pd.read_csv(path, dtype=str, encoding="utf-8-sig").fillna("")
     df = df[df["scope"] == "include"].copy()
     df["requires_context"] = df["requires_context"].str.lower() == "true"

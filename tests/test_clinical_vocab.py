@@ -7,9 +7,13 @@ import re
 
 import pytest
 
-from core_data_loader.common.clinical_vocab import (
-    ASSAY_TYPES, IEDB_CATEGORY, SYMPTOMS,
-    match_assay_name, parse_ctl_methods, parse_symptoms,
+from core_data_loader.curated.clinical_vocab import (
+    ASSAY_TYPES,
+    IEDB_CATEGORY,
+    SYMPTOMS,
+    match_assay_name,
+    parse_ctl_methods,
+    parse_symptoms,
 )
 
 # --- every distinct string in the loaded data maps fully ---------------------

@@ -1,6 +1,6 @@
 """
 Tests for the curated LANL-target mapping in
-core_data_loader.common.antibody_targets.
+core_data_loader.curated.antibody_targets.
 
 LANL reports an antibody's target as a bare product label. core.antibody_epitope
 has a protein_id column for it, but a label like "glycoprotein" cannot pick one
@@ -11,7 +11,7 @@ answerable at all.
 
 import pytest
 
-from core_data_loader.common.antibody_targets import LANL_PROTEIN_TO_GENE_SYMBOL
+from core_data_loader.curated.antibody_targets import LANL_PROTEIN_TO_GENE_SYMBOL
 
 # The nine symbols in UCSC's reference gene model, which core.gene holds.
 GENE_MODEL = {"GP", "L", "NP", "sGP", "ssGP", "VP24", "VP30", "VP35", "VP40"}

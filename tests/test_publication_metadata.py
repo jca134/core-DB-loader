@@ -1,13 +1,13 @@
 """
 Tests for the PubMed esummary parsing in
-core_data_loader.loaders.fetch_publication_metadata.
+core_data_loader.fetchers.publication_metadata.
 
 PubMed's `pubdate` is free text with several shapes, and the year pulled out of
-it becomes core.kg_node.node_date -- which decides what a temporal split treats
-as already known. Misreading it silently shifts a benchmark's cutoff.
+it becomes core.publication.year -- which decides what any time-based split
+treats as already known. Misreading it silently shifts the cutoff.
 """
 
-from core_data_loader.loaders.fetch_publication_metadata import parse_record
+from core_data_loader.fetchers.publication_metadata import parse_record
 
 
 def _rec(**kw):

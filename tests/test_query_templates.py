@@ -5,9 +5,13 @@ import stat
 
 import pytest
 
-from core_data_loader.query import api_key
-from core_data_loader.query.templates import (
-    OPTION_QUERIES, TEMPLATES, VIRUS_IDS, resolve_params, TEMPLATES_BY_ID,
+from core_data_loader.graph import api_key
+from core_data_loader.graph.templates import (
+    OPTION_QUERIES,
+    TEMPLATES,
+    TEMPLATES_BY_ID,
+    VIRUS_IDS,
+    resolve_params,
 )
 
 OPTIONS = {"gene": [{"value": "GP", "label": "GP"}], "condition": [{"value": 1, "label": "Ebola"}]}
