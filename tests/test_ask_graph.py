@@ -2,7 +2,8 @@
 
 from datetime import date
 
-from core_data_loader.query.ask_graph import MAX_CELL_CHARS, PAGE, _clean
+from core_data_loader.query.ask_graph import MAX_CELL_CHARS, _clean
+from core_data_loader.query.web import PAGE
 
 
 def test_long_text_is_truncated_before_it_reaches_the_model():

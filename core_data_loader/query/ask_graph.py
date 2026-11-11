@@ -15,16 +15,14 @@ generated `DELETE` fails instead of damaging the graph (and the graph is a
 rebuildable copy of Postgres anyway). Each query has a time limit and its
 result is capped before it goes back to the model.
 
-Needs an Anthropic API key in ANTHROPIC_API_KEY, plus the NEO4J_* variables
-export_neo4j uses.
+Needs an Anthropic API key: ANTHROPIC_API_KEY, or one saved from the query
+page (see api_key.py). The page's ready-made questions need no key at all.
 """
 
 import argparse
 import json
 import sys
 from datetime import date, datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
 import anthropic
 from anthropic import beta_tool
@@ -32,6 +30,7 @@ from neo4j import GraphDatabase, READ_ACCESS, unit_of_work
 from neo4j.exceptions import Neo4jError
 
 from core_data_loader.export.export_neo4j import NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
+from core_data_loader.query import api_key
 
 MODEL = "claude-opus-5-5"
 MAX_ROWS = 50            # rows of a result the model sees
@@ -92,10 +91,10 @@ class Graph:
         self.driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
         self.driver.verify_connectivity()
 
-    def run(self, cypher: str) -> list[dict]:
+    def run(self, cypher: str, params: dict | None = None) -> list[dict]:
         @unit_of_work(timeout=QUERY_TIMEOUT_S)
         def work(tx):
-            result = tx.run(cypher)
+            result = tx.run(cypher, params or {})
             return [r.data() for r in result]
 
         with self.driver.session(default_access_mode=READ_ACCESS) as session:
@@ -173,95 +172,46 @@ def ask(question: str, graph: Graph, client: anthropic.Anthropic, system: str) -
 
 
 # ---------------------------------------------------------------------------
-# Command line and web page
+# Command line (the web page is core_data_loader/query/web.py)
 # ---------------------------------------------------------------------------
-
-PAGE = Path(__file__).with_name("ask_graph.html")
-
-
-def serve(port: int, graph: Graph, client: anthropic.Anthropic, system: str):
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            body = PAGE.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_POST(self):
-            if self.path != "/ask":
-                self.send_error(404)
-                return
-            length = int(self.headers.get("Content-Length", 0))
-            question = json.loads(self.rfile.read(length) or b"{}").get("question", "").strip()
-            try:
-                result = ask(question, graph, client, system) if question else {"error": "Empty question"}
-                status = 200
-            except anthropic.APIError as e:
-                result, status = {"error": f"Claude API error: {e}"}, 502
-            body = json.dumps(result, default=str).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, fmt, *args):
-            pass
-
-    # Bound to localhost only: the page spends API credit on every question.
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"Ask the graph at http://localhost:{port}  (Ctrl-C to stop)")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("question", nargs="*", help="question to ask (omit with --serve)")
-    parser.add_argument("--serve", action="store_true", help="run the web page instead")
+    parser.add_argument("--serve", action="store_true",
+                        help="run the query page: ready-made questions free, AI questions with a key")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--show-schema", action="store_true", help="print the schema Claude sees and exit")
     args = parser.parse_args()
 
-    graph = Graph()
-    system = GUIDE + graph.schema()
-    if args.show_schema:
-        print(system)
+    if args.serve:
+        from core_data_loader.query.web import serve
+        serve(args.port)
         return
-    # Fail now, with a clear message, rather than on the first question: the
-    # SDK only discovers missing credentials when it sends a request.
+
+    graph = Graph()
     try:
-        client = anthropic.Anthropic()
-        client.models.retrieve(MODEL)
-    except TypeError:
-        graph.close()
-        sys.exit("No Anthropic API key found. Run: export ANTHROPIC_API_KEY='sk-ant-api03-...' "
-                 "with your real key from https://console.anthropic.com (see README).")
-    except anthropic.AuthenticationError:
-        graph.close()
-        sys.exit("Anthropic rejected ANTHROPIC_API_KEY. Is it the real key (not the README's "
-                 "'sk-ant-...' placeholder), copied whole, and not revoked? Create one at "
-                 "https://console.anthropic.com -> API Keys.")
-    except anthropic.PermissionDeniedError:
-        graph.close()
-        sys.exit(f"The API key works but has no access to {MODEL}; check billing / credit "
-                 "at https://console.anthropic.com.")
-    try:
-        if args.serve:
-            serve(args.port, graph, client, system)
-        elif args.question:
-            result = ask(" ".join(args.question), graph, client, system)
-            print(result["answer"])
-            print("\nCypher run:")
-            for q in result["queries"]:
-                outcome = f"error: {q['error']}" if "error" in q else f"{q['rows']} rows"
-                print(f"  [{outcome}]\n    " + q["cypher"].replace("\n", "\n    "))
-        else:
+        system = GUIDE + graph.schema()
+        if args.show_schema:
+            print(system)
+            return
+        if not args.question:
             parser.print_help()
+            return
+        key, _source = api_key.current_key()
+        if not key:
+            sys.exit("No Anthropic API key. Either add one on the query page (--serve), or run\n"
+                     "  export ANTHROPIC_API_KEY='sk-ant-api03-...'\n"
+                     "with your key from https://console.anthropic.com -> API Keys.")
+        client, problem = api_key.check_key(key, MODEL)
+        if problem:
+            sys.exit(problem)
+        result = ask(" ".join(args.question), graph, client, system)
+        print(result["answer"])
+        print("\nCypher run:")
+        for q in result["queries"]:
+            outcome = f"error: {q['error']}" if "error" in q else f"{q['rows']} rows"
+            print(f"  [{outcome}]\n    " + q["cypher"].replace("\n", "\n    "))
     finally:
         graph.close()
 

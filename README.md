@@ -21,18 +21,24 @@ brew services start neo4j
 # 2. Refresh the graph from Postgres (after any data change; ~20 s)
 uv run python -m core_data_loader.export.export_neo4j
 
-# 3a. Ask questions in plain English -> open http://localhost:8765
-#     Replace the placeholder with your real key (console.anthropic.com -> API Keys)
-export ANTHROPIC_API_KEY='sk-ant-api03-YOUR-KEY-HERE'
+# 3. Open the query page -> http://localhost:8765
 uv run python -m core_data_loader.query.ask_graph --serve
-
-# 3b. ...or one question from the terminal
-uv run python -m core_data_loader.query.ask_graph "Which antibodies target GP?"
 ```
+
+The page has two parts:
+
+- **Pick a question (free).** Ready-made questions with dropdowns ("Which
+  antibodies target [GP]?", "Which NIH grants study [Marburg viruses]?", ...).
+  Each one is a fixed, checked Cypher query. No key or account needed. Results
+  download as CSV.
+- **Ask in your own words (optional, uses AI).** Paste an Anthropic API key
+  into the page once; it is checked, then saved in your home folder
+  (`~/.config/filovirus-graph/`), never in the repo. Each question costs a few
+  cents. Get a key at <https://console.anthropic.com/settings/keys>.
 
 | What | Where |
 | --- | --- |
-| Plain-English query page | <http://localhost:8765> (while `--serve` is running) |
+| Query page | <http://localhost:8765> (while `--serve` is running) |
 | Neo4j Browser (write Cypher yourself) | <http://localhost:7474>, user `neo4j`, password `filovirus` |
 | Stop Neo4j | `brew services stop neo4j` |
 
@@ -271,20 +277,25 @@ RETURN p, paper, g LIMIT 25
 
 Raw sequence strings and lineage tables stay in Postgres only.
 
-### Asking in plain English
+### The query page
 
-For people who don't write Cypher: Claude turns a question into Cypher, runs
-it against the graph, and answers, showing every query it ran so the answer
-can be checked in Neo4j Browser. Queries run in read-only transactions, so a
-bad query can't change the graph.
+`uv run python -m core_data_loader.query.ask_graph --serve` serves
+<http://localhost:8765>, on this computer only.
 
-It needs an Anthropic API key (from <https://console.anthropic.com>), exported
-as `ANTHROPIC_API_KEY`. Each question costs a few cents.
+**Ready-made questions** (`core_data_loader/query/templates.py`) are free and
+need no key. Each is a reviewed Cypher query with dropdown blanks; the values
+go to Neo4j only as query parameters. Picking "Ebola viruses" or "Marburg
+viruses" searches both of NCBI's genus names (old and new), because the
+sources link to both. To add a question, append to `TEMPLATES`.
+
+**Plain-English questions** use Claude: it turns a question into Cypher, runs
+it, and answers, showing every query it ran. Queries run in read-only
+transactions, so a bad query can't change the graph. A key comes from
+`ANTHROPIC_API_KEY` if set, otherwise from one saved through the page. The
+same works from the terminal:
 
 ```bash
-export ANTHROPIC_API_KEY='sk-ant-api03-YOUR-KEY-HERE'
 uv run python -m core_data_loader.query.ask_graph "Which antibodies target GP?"
-uv run python -m core_data_loader.query.ask_graph --serve   # web page at http://localhost:8765
 ```
 
 `--show-schema` prints the graph description Claude is given. That
@@ -305,7 +316,7 @@ export.
 | `core_data_loader/loaders/` | One script per source; loads raw files into `raw.<table>` |
 | `core_data_loader/etl/` | Transforms `raw.*` tables into `core.*` |
 | `core_data_loader/export/export_neo4j.py` | Rebuilds the Neo4j graph from `core.*` |
-| `core_data_loader/query/ask_graph.py` | Plain-English questions -> Cypher -> answers (CLI and web page) |
+| `core_data_loader/query/` | Query page (`web.py`), ready-made questions (`templates.py`), plain-English questions via Claude (`ask_graph.py`) |
 | `core_data_loader/profiling/profile_bvbrc.py` | Profiles `raw.bvbrc_*` columns, writes `profile/bvbrc_profile.csv` |
 | `sql/` | Schema DDL — run once against a fresh database |
 | `overview/` | Project orientation, the SerenQA paper, and team planning docs (git-ignored) |

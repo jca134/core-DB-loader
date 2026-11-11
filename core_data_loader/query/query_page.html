@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Filovirus Graph Explorer</title>
+<style>
+  :root {
+    --bg:#f6f5f1; --card:#ffffff; --ink:#1c1c1a; --muted:#6a6963; --line:#e3e1da;
+    --accent:#8a2b1f; --on-accent:#ffffff; --accent-soft:#f4e6e2; --code:#f0eee8; --err:#a3261b; --ok:#2f6b3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#151514; --card:#1e1e1c; --ink:#ecebe6; --muted:#9b9a93; --line:#34332f;
+      --accent:#e3826f; --on-accent:#1c1c1a; --accent-soft:#3a2420; --code:#262624; --err:#f08a7d; --ok:#8fcf98;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  main { max-width:1040px; margin:0 auto; padding:36px 16px 80px; }
+  h1 { font-size:1.55rem; margin:0 0 4px; letter-spacing:-.01em; }
+  h2 { font-size:1.05rem; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 28px; max-width:70ch; }
+  .hint { color:var(--muted); font-size:.88rem; margin:0 0 14px; }
+  section.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin-bottom:20px; }
+  .tag { display:inline-block; font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em; padding:2px 8px; border-radius:99px; margin-left:8px; vertical-align:2px; }
+  .tag.free { background:color-mix(in srgb, var(--ok) 15%, transparent); color:var(--ok); }
+  .tag.ai { background:var(--accent-soft); color:var(--accent); }
+
+  .layout { display:grid; grid-template-columns: 300px 1fr; gap:20px; }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+  .qlist { display:flex; flex-direction:column; gap:2px; max-height:520px; overflow:auto; padding-right:4px; }
+  .qgroup { font-size:.75rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin:12px 0 4px; }
+  .qgroup:first-child { margin-top:0; }
+  .qitem { text-align:left; background:none; border:1px solid transparent; border-radius:8px; padding:7px 10px; color:var(--ink); font:inherit; font-size:.92rem; cursor:pointer; }
+  .qitem:hover { background:var(--code); }
+  .qitem.active { background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 35%, transparent); }
+
+  .builder { min-width:0; }
+  .sentence { font-size:1.12rem; line-height:2.1; margin:0 0 14px; }
+  .sentence select, .sentence input { font:inherit; font-size:1rem; padding:4px 8px; border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--ink); max-width:100%; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  button.primary { background:var(--accent); color:var(--on-accent); border:0; border-radius:8px; padding:9px 18px; font:inherit; font-weight:600; cursor:pointer; }
+  button.primary:disabled { opacity:.5; cursor:wait; }
+  button.link { background:none; border:0; color:var(--accent); font:inherit; font-size:.88rem; cursor:pointer; padding:0; text-decoration:underline; }
+
+  .result { margin-top:18px; }
+  .meta { color:var(--muted); font-size:.85rem; margin-bottom:8px; }
+  .tablewrap { overflow:auto; max-height:560px; border:1px solid var(--line); border-radius:8px; }
+  table { border-collapse:collapse; width:100%; font-size:.86rem; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { position:sticky; top:0; background:var(--code); font-weight:600; white-space:nowrap; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  tr:last-child td { border-bottom:0; }
+  a { color:var(--accent); }
+  details { margin-top:10px; }
+  summary { cursor:pointer; color:var(--muted); font-size:.86rem; }
+  pre { background:var(--code); padding:10px 12px; border-radius:7px; overflow-x:auto; font-size:.8rem; margin:8px 0 0; }
+  .error { color:var(--err); }
+  .empty { color:var(--muted); padding:14px 0; }
+
+  textarea, input.key { width:100%; font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
+  textarea { min-height:64px; resize:vertical; }
+  .answer { white-space:pre-wrap; margin-top:14px; }
+  .keybox { background:var(--code); border-radius:10px; padding:14px 16px; }
+  .keybox ol { margin:6px 0 12px; padding-left:20px; }
+  .keybox label { font-size:.88rem; display:flex; gap:6px; align-items:center; }
+  .status { font-size:.86rem; color:var(--muted); }
+  .status b { color:var(--ok); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Filovirus Graph Explorer</h1>
+  <p class="sub">Questions about Ebola and Marburg viruses, their genes and antibodies, and the NIH grants, patents and papers about them. Every answer shows the Cypher query behind it, so you can check or reuse it in Neo4j Browser.</p>
+
+  <section class="card">
+    <h2>Pick a question <span class="tag free">Free</span></h2>
+    <p class="hint">Choose a question, fill in the blanks, and run it. These are fixed, checked queries — no AI involved.</p>
+    <div class="layout">
+      <div class="qlist" id="qlist"></div>
+      <div class="builder">
+        <p class="sentence" id="sentence"><span class="empty">← Choose a question</span></p>
+        <div class="row"><button class="primary" id="run" disabled>Run</button></div>
+        <div class="result" id="tresult"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Ask in your own words <span class="tag ai">Optional · uses AI</span></h2>
+    <p class="hint">Claude writes the query for any question, then answers from the results. Needs your own Anthropic API key; each question costs a few cents.</p>
+    <div id="aiarea"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opts);
+  let data;
+  try { data = await r.json(); } catch { data = { error: `Server error (${r.status})` }; }
+  return data;
+}
+
+// ---------------------------------------------------------------- templates
+let TEMPLATES = [], OPTIONS = {}, current = null;
+
+function renderQuestionList() {
+  const list = $("qlist"); list.innerHTML = "";
+  let group = null;
+  for (const t of TEMPLATES) {
+    if (t.group !== group) { group = t.group; list.appendChild(el("div", "qgroup", group)); }
+    const b = el("button", "qitem", t.question.replace(/\{(\w+)\}/g, (_, p) => "…"));
+    b.onclick = () => selectTemplate(t, b);
+    list.appendChild(b);
+  }
+}
+
+function selectTemplate(t, button) {
+  current = t;
+  document.querySelectorAll(".qitem").forEach((n) => n.classList.toggle("active", n === button));
+  const s = $("sentence"); s.innerHTML = "";
+  const parts = t.question.split(/(\{\w+\})/);
+  for (const part of parts) {
+    const m = part.match(/^\{(\w+)\}$/);
+    if (!m) { s.appendChild(document.createTextNode(part)); continue; }
+    const p = t.params.find((x) => x.name === m[1]);
+    let input;
+    if (p.type === "text") {
+      input = el("input"); input.placeholder = "e.g. vaccine"; input.size = 16;
+      input.onkeydown = (e) => { if (e.key === "Enter") runTemplate(); };
+    } else {
+      input = el("select");
+      for (const o of OPTIONS[p.type] || []) { const opt = el("option", null, o.label); opt.value = o.value; input.appendChild(opt); }
+    }
+    input.dataset.param = p.name;
+    s.appendChild(input);
+  }
+  $("run").disabled = false;
+  $("tresult").innerHTML = "";
+}
+
+async function runTemplate() {
+  if (!current) return;
+  const params = {};
+  document.querySelectorAll("#sentence [data-param]").forEach((i) => params[i.dataset.param] = i.value);
+  const out = $("tresult"); out.innerHTML = ""; out.appendChild(el("div", "meta", "Running…"));
+  $("run").disabled = true;
+  const data = await api("/api/template", { id: current.id, params });
+  $("run").disabled = false;
+  out.innerHTML = "";
+  if (data.error) { out.appendChild(el("div", "error", data.error)); return; }
+  renderTable(out, data.columns, data.rows, sentenceText());
+  const d = el("details"); d.appendChild(el("summary", null, "Show the Cypher query"));
+  d.appendChild(el("pre", null, data.cypher + "\n\n// parameters: " + JSON.stringify(data.params)));
+  out.appendChild(d);
+}
+
+function sentenceText() {
+  return [...$("sentence").childNodes].map((n) => n.nodeType === 3 ? n.textContent
+    : n.tagName === "SELECT" ? n.options[n.selectedIndex].text : n.value).join("");
+}
+
+function renderTable(out, columns, rows, title) {
+  if (!rows.length) { out.appendChild(el("div", "empty", "No results — the graph has nothing that matches.")); return; }
+  const meta = el("div", "meta row");
+  meta.appendChild(el("span", null, `${rows.length} row${rows.length === 1 ? "" : "s"}${rows.length >= 200 ? " (first 200)" : ""}`));
+  const csv = el("button", "link", "Download CSV"); csv.onclick = () => downloadCSV(columns, rows, title);
+  meta.appendChild(csv); out.appendChild(meta);
+  const wrap = el("div", "tablewrap"), table = el("table"), thead = el("thead"), hr = el("tr");
+  for (const c of columns) hr.appendChild(el("th", null, c));
+  thead.appendChild(hr); table.appendChild(thead);
+  const tbody = el("tbody");
+  for (const r of rows) {
+    const tr = el("tr");
+    r.forEach((v, i) => {
+      const td = el("td", typeof v === "number" ? "num" : null);
+      if (columns[i] === "Link" && typeof v === "string" && /^https?:\/\//.test(v)) {
+        const a = el("a", null, "open ↗"); a.href = v; a.target = "_blank"; a.rel = "noopener"; td.appendChild(a);
+      } else if (typeof v === "boolean") td.textContent = v ? "yes" : "no";
+      else td.textContent = v == null ? "" : (typeof v === "number" && v > 9999 ? v.toLocaleString() : v);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody); wrap.appendChild(table); out.appendChild(wrap);
+}
+
+function downloadCSV(columns, rows, title) {
+  const q = (v) => v == null ? "" : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+  const text = [columns.map(q).join(","), ...rows.map((r) => r.map(q).join(","))].join("\n");
+  const a = el("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
+  a.download = (title || "results").replace(/[^\w]+/g, "_").replace(/^_|_$/g, "").slice(0, 60) + ".csv";
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+$("run").onclick = runTemplate;
+
+// ---------------------------------------------------------------- AI section
+function renderAI(status) {
+  const area = $("aiarea"); area.innerHTML = "";
+  if (!status.ai) {
+    const box = el("div", "keybox");
+    box.appendChild(el("strong", null, "Add your Anthropic API key to turn this on"));
+    const ol = el("ol");
+    const li1 = el("li"); li1.append("Go to ");
+    const link = el("a", null, "console.anthropic.com → API Keys"); link.href = "https://console.anthropic.com/settings/keys"; link.target = "_blank"; link.rel = "noopener";
+    li1.append(link, " and create a key (needs billing / credit set up).");
+    ol.append(li1, el("li", null, "Paste it below. It's checked with Anthropic before it's used."));
+    box.appendChild(ol);
+    const input = el("input", "key"); input.type = "password"; input.placeholder = "sk-ant-api03-…"; input.autocomplete = "off";
+    box.appendChild(input);
+    const row = el("div", "row"); row.style.marginTop = "10px";
+    const remember = el("input"); remember.type = "checkbox"; remember.checked = true;
+    const label = el("label"); label.append(remember, "Remember on this computer (saved in your home folder, never in the repo)");
+    const save = el("button", "primary", "Save key");
+    const msg = el("div", "error"); msg.style.marginTop = "8px";
+    save.onclick = async () => {
+      save.disabled = true; msg.className = "status"; msg.textContent = "Checking key…";
+      const r = await api("/api/key", { key: input.value, remember: remember.checked });
+      save.disabled = false;
+      if (r.error) { msg.className = "error"; msg.textContent = r.error; return; }
+      renderAI(r);
+    };
+    input.onkeydown = (e) => { if (e.key === "Enter") save.click(); };
+    row.append(save, label); box.append(row, msg);
+    area.appendChild(box);
+    return;
+  }
+  const st = el("div", "status row");
+  st.innerHTML = "<b>●</b>&nbsp;AI on";
+  st.append(` · key from ${status.key_source}`);
+  if (status.key_source !== "environment") {
+    const forget = el("button", "link", "forget key"); forget.style.marginLeft = "6px";
+    forget.onclick = async () => renderAI(await api("/api/key/forget", {}));
+    st.append(" · ", forget);
+  }
+  area.appendChild(st);
+  const ta = el("textarea"); ta.placeholder = "e.g. Which Marburg grants also study antibodies, and which papers did they cite?"; ta.style.marginTop = "10px";
+  const row = el("div", "row"); row.style.marginTop = "8px";
+  const ask = el("button", "primary", "Ask");
+  row.appendChild(ask);
+  const out = el("div");
+  ask.onclick = async () => {
+    const question = ta.value.trim(); if (!question) return;
+    ask.disabled = true; out.innerHTML = ""; out.appendChild(el("div", "meta", "Writing and running Cypher… (this can take 20–60 s)"));
+    const r = await api("/api/ask", { question });
+    ask.disabled = false; out.innerHTML = "";
+    if (r.error) { out.appendChild(el("div", "error", r.error)); return; }
+    out.appendChild(el("div", "answer", r.answer));
+    const d = el("details"); d.appendChild(el("summary", null, `Cypher run (${r.queries.length})`));
+    for (const q of r.queries) {
+      d.appendChild(el("pre", null, q.cypher));
+      d.appendChild(el("div", q.error ? "error meta" : "meta", q.error ? "error: " + q.error : `${q.rows} rows`));
+    }
+    out.appendChild(d);
+  };
+  ta.onkeydown = (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) ask.click(); };
+  area.append(ta, row, out);
+}
+
+(async () => {
+  const [t, s] = await Promise.all([api("/api/templates"), api("/api/status")]);
+  if (t.error) { $("qlist").appendChild(el("div", "error", t.error)); return; }
+  TEMPLATES = t.templates; OPTIONS = t.options;
+  renderQuestionList();
+  const first = document.querySelector(".qitem");
+  if (first) first.click();
+  renderAI(s);
+})();
+</script>
+</body>
+</html>
