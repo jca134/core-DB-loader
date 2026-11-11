@@ -34,3 +34,12 @@ def test_props_drop_nulls_and_bulk_columns_and_convert_decimals():
     props = _props({"a": None, "sequence_text": "ACGT", "source_id": 3,
                     "resolution": Decimal("2.5"), "d": date(2020, 1, 1), "l": ["x", None]})
     assert props == {"resolution": 2.5, "d": date(2020, 1, 1), "l": ["x"]}
+
+
+def test_display_name_never_silently_replaces_a_real_name_column():
+    # SELECT *, <expr> AS name keeps only one `name`: a table with its own name
+    # column must either use it as the display name or build on it.
+    tables_with_name_column = {"gene_family": "name"}
+    for label, table, _key, name_expr in NODES:
+        if table in tables_with_name_column:
+            assert "name" in name_expr.replace("symbol", ""), label

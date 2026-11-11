@@ -86,6 +86,7 @@ virtualenv is activated.
 | `fetch NAME ...` | NIH RePORTER / PubMed lookups that add CSVs to `data/`. Run once and keep the files ([details](docs/data-sources.md#written-by-filovirus-fetch-network-free-no-key)) |
 | `build` | `raw.*` → `core.*` in the required order, then the data-quality checks |
 | `check` | only the data-quality checks; every failure count should be 0 |
+| `compare OTHER_DB` | compare this database's contents with another build, table by table |
 | `export` | rebuild the Neo4j graph from `core.*` |
 | `serve` | the query page at <http://localhost:8765> |
 | `ask "QUESTION"` | one plain-English question in the terminal (needs an API key) |
@@ -113,12 +114,12 @@ core_data_loader/
 ├── cli.py          the `filovirus` command
 ├── config.py       every setting and path, from the environment
 ├── common/         DB engine, value parsing, raw/ETL helpers, source catalog, keyword matcher
-├── curated/        hand-curated mappings: taxon→disease, antibody→gene, symptom/assay vocabularies
+├── curated/        hand-curated mappings: taxon→disease, antibody→gene, gene families, symptom/assay vocabularies
 ├── loaders/        one per source: data/ → raw.*            (filovirus load)
 ├── fetchers/       NIH RePORTER / PubMed lookups → data/     (filovirus fetch)
 ├── etl/            raw.* → core.*, run in order by pipeline.py   (filovirus build)
 └── graph/          Neo4j export, query page, ready-made questions, Claude questions
-sql/                schema DDL (01–05) and the data-quality checks (checks.sql)
+sql/                schema DDL (01–06) and the data-quality checks (checks.sql)
 tests/              unit tests: pure logic only, no database needed
 docs/               the documentation above
 ```
@@ -131,11 +132,15 @@ uv run ruff check .     # lint
 uv run filovirus check  # data-quality checks against the live database
 ```
 
-Before merging an ETL change, rebuild a throwaway copy of the database and
-compare it with the real one. Matching row counts alone have hidden real bugs
-here before.
+CI (`.github/workflows/ci.yml`) runs the lint and unit tests on every push.
+
+Before merging an ETL change, build a throwaway copy with the change and
+compare its contents with the real database. Matching row counts alone have
+hidden real bugs here before.
 
 ```bash
 createdb -T filovirus filovirus_test
 FILOVIRUS_DB_URL=postgresql+psycopg2://$USER@localhost:5432/filovirus_test uv run filovirus build
+uv run filovirus compare filovirus_test   # every DIFF should be a change you meant
+dropdb filovirus_test
 ```

@@ -56,6 +56,9 @@ NODES = [
     ("Feature", "feature", "feature_id", "coalesce(product, gene, feature_type)"),
     ("Protein", "protein", "protein_id", "coalesce(product, gene)"),
     ("Gene", "gene", "gene_id", "gene_symbol"),
+    # gene_family has its own `name` column (the full name); the display name
+    # must keep it, since SELECT *, <expr> AS name lets the second `name` win.
+    ("GeneFamily", "gene_family", "gene_family_id", "symbol || ': ' || name"),
     ("GeneDomain", "gene_domain", "gene_domain_id", "pfam_name"),
     ("Structure", "structure", "structure_id", "pdb_id"),
     ("Epitope", "epitope", "epitope_id", "epitope_sequence"),
@@ -92,6 +95,13 @@ EDGES = [
     ("Feature", "ON_SEQUENCE", "Sequence", "SELECT feature_id s, sequence_id d FROM core.feature WHERE sequence_id IS NOT NULL"),
     ("Gene", "ON_SEQUENCE", "Sequence", "SELECT gene_id s, sequence_id d FROM core.gene WHERE sequence_id IS NOT NULL"),
     ("Protein", "ENCODED_BY", "Feature", "SELECT protein_id s, feature_id d FROM core.protein WHERE feature_id IS NOT NULL"),
+    # Gene families: the virus-neutral bridge between proteins of every
+    # filovirus and the Ebola reference genes (curated/gene_families.py).
+    ("Gene", "IN_FAMILY", "GeneFamily",
+     "SELECT gene_id s, gene_family_id d FROM core.gene WHERE gene_family_id IS NOT NULL"),
+    ("Protein", "IN_FAMILY", "GeneFamily",
+     "SELECT protein_id s, gene_family_id d, gene_family_basis AS basis FROM core.protein "
+     "WHERE gene_family_id IS NOT NULL"),
     ("GeneDomain", "DOMAIN_OF", "Gene", "SELECT gene_domain_id s, gene_id d FROM core.gene_domain WHERE gene_id IS NOT NULL"),
     ("Structure", "OF_PROTEIN", "Protein", "SELECT structure_id s, protein_id d FROM core.structure WHERE protein_id IS NOT NULL"),
     ("Structure", "OF_TAXON", "Taxon", "SELECT structure_id s, taxon_id d FROM core.structure WHERE taxon_id IS NOT NULL"),

@@ -44,11 +44,15 @@ FILES = [
 #                                  PubMed where possible -- written by
 #                                  `filovirus fetch patent-citations` from
 #                                  patent_external_literature_edges.csv.
+#   patent_details.csv             each patent's abstract and publication /
+#                                  filing / priority dates, from its Google
+#                                  Patents page (`filovirus fetch patent-details`).
 OPTIONAL_FILES = [
     ("patent_evidence_expanded.csv", "uspto_patents_expanded"),
     ("patent_entity_links.csv", "uspto_patent_entity_links"),
     ("patent_team_paper_edges.csv", "uspto_patent_team_papers"),
     ("patent_cited_publications.csv", "uspto_patent_cited_publications"),
+    ("patent_details.csv", "uspto_patent_details"),
 ]
 
 # Search-UI checkbox columns, blank in every row of every export.

@@ -75,6 +75,7 @@ PATENTS_EXPANDED_TABLE = "uspto_patents_expanded"
 PATENT_LINKS_TABLE = "uspto_patent_entity_links"
 PATENT_TEAM_PAPERS_TABLE = "uspto_patent_team_papers"
 PATENT_CITED_PUBS_TABLE = "uspto_patent_cited_publications"
+PATENT_DETAILS_TABLE = "uspto_patent_details"
 PAPERS_TABLE = "papers_unique"
 PAPER_REFS_TABLE = "papers_references"
 PAPER_META_TABLE = "papers_metadata"
@@ -876,6 +877,17 @@ def _patent_abstract_hits(matcher):
     return hits
 
 
+def _patent_details() -> dict:
+    """
+    document_id -> abstract and dates from each patent's Google Patents page
+    (`filovirus fetch patent-details`). Empty when the file wasn't fetched.
+    """
+    if not raw_table_exists(PATENT_DETAILS_TABLE):
+        return {}
+    return {normalize_document_id(r["document_id"]): r
+            for r in read_raw(PATENT_DETAILS_TABLE).fillna("").to_dict("records")}
+
+
 def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
     if not raw_table_exists(PATENTS_TABLE):
         print("core.patent: raw.uspto_patents absent, skipped")
@@ -884,24 +896,34 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
     taxon_ids = {row[0] for row in conn.execute(text("SELECT taxon_id FROM core.taxon"))}
     groups, expanded_count = _patent_groups()
     abstract_hits = _patent_abstract_hits(matcher)
+    details = _patent_details()
+    filled_dates = 0
 
     patent_ids = {}
     patent_count = cpc_count = dropped_no_context = 0
     for document_id, group in groups:
         first = group.iloc[0]
         kind = KIND_CODE_RE.search(document_id)
+        # The USPTO export is authoritative; the patent's own page only fills
+        # what the export left blank (the expanded search had no dates at all).
+        detail = details.get(document_id, {})
+        date_published = safe_date(first["date_published"])
+        if date_published is None and safe_date(detail.get("publication_date")):
+            date_published = safe_date(detail["publication_date"])
+            filled_dates += 1
+        abstract = blank_to_none(detail.get("abstract"))
 
         patent_id = conn.execute(
             text(
                 """
                 INSERT INTO core.patent
                     (document_id, kind_code, title, family_id, application_num,
-                     date_published, filing_date, inventor, assignee, applicant_name,
-                     cpc_inventive, cpc_additional, page_count, source_id)
+                     date_published, filing_date, priority_date, inventor, assignee, applicant_name,
+                     cpc_inventive, cpc_additional, page_count, abstract, source_id)
                 VALUES
                     (:document_id, :kind_code, :title, :family_id, :application_num,
-                     :date_published, :filing_date, :inventor, :assignee, :applicant_name,
-                     :cpc_inventive, :cpc_additional, :page_count, :source_id)
+                     :date_published, :filing_date, :priority_date, :inventor, :assignee, :applicant_name,
+                     :cpc_inventive, :cpc_additional, :page_count, :abstract, :source_id)
                 RETURNING patent_id
                 """
             ),
@@ -911,14 +933,16 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
                 "title": blank_to_none(first["title"]),
                 "family_id": blank_to_none(first["family_id"]),
                 "application_num": blank_to_none(first["application_number"]),
-                "date_published": safe_date(first["date_published"]),
-                "filing_date": safe_date(first["filing_date"]),
+                "date_published": date_published,
+                "filing_date": safe_date(first["filing_date"]) or safe_date(detail.get("filing_date")),
+                "priority_date": safe_date(detail.get("priority_date")),
                 "inventor": blank_to_none(first["inventor"]),
                 "assignee": blank_to_none(first["assignee"]),
                 "applicant_name": blank_to_none(first["applicant_name"]),
                 "cpc_inventive": blank_to_none(first["cpci"]),
                 "cpc_additional": blank_to_none(first["cpca"]),
                 "page_count": safe_int(first["pages"]),
+                "abstract": abstract,
                 "source_id": sid,
             },
         ).scalar()
@@ -927,6 +951,8 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
         add_xref(xref_rows, "patent", patent_id, sid, "uspto_document_id", document_id)
         add_xref(xref_rows, "patent", patent_id, sid, "uspto_application_num", first["application_number"])
         add_provenance(provenance_rows, "patent", patent_id, sid, first["raw_table_"], first["raw_pk_"])
+        if detail:
+            add_provenance(provenance_rows, "patent", patent_id, sid, PATENT_DETAILS_TABLE, detail["document_id"])
 
         for column, kind_label in (("cpci", "inventive"), ("cpca", "additional")):
             for code in str(first[column]).split(";"):
@@ -964,6 +990,8 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
         # title is the subject matter, not an incidental mention.
         patent_hits.extend(matcher.match(first["title"], "title"))
         patent_hits.extend(abstract_hits.get(document_id, []))
+        if abstract:
+            patent_hits.extend(matcher.match(abstract, "abstract"))
 
         has_context = organism_context_established(patent_hits)
         for hit in patent_hits:
@@ -977,6 +1005,9 @@ def build_patents(conn, matcher, links, xref_rows, provenance_rows, sid):
                       _support(hit["match_field"], hit["match_method"], hit["matched_term"],
                                hit["term_type"], hit["requires_context"]))
 
+    if details:
+        print(f"  patent details: {sum(1 for d in details.values() if d.get('abstract'))} abstracts, "
+              f"{filled_dates} publication dates filled from Google Patents")
     print(f"core.patent: {patent_count} rows ({expanded_count} from the expanded search), "
           f"core.patent_cpc: {cpc_count} rows")
     if dropped_no_context:

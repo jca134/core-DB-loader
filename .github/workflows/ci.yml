@@ -1,0 +1,23 @@
+name: CI
+
+# Lint and unit tests on every push and pull request. The tests cover pure
+# logic only and need no database, data files or network; the full pipeline
+# is verified locally against the real database (see README, Development).
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Unit tests
+        run: uv run pytest -q
