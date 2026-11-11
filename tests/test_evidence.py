@@ -304,3 +304,34 @@ def test_grant_numbers_are_found_in_government_interest_statements():
     older = "under NIH Grant Nos. AI 51292 and Grant A1057153 from the NIH"
     assert {grant_serial(m) for m in GRANT_IN_TEXT_RE.finditer(older)} == {"AI051292", "AI057153"}
     assert [m.group(1) for m in CONTRACT_IN_TEXT_RE.finditer(s)] == ["272201400058"]
+
+
+def test_acknowledged_grant_numbers_keep_their_activity_code():
+    from core_data_loader.etl.evidence import ACKNOWLEDGED_GRANT_RE
+    parsed = [(m.group(1), m.group(2) + m.group(3).zfill(6))
+              for g in ("K08-AI079381", "T32 GM007215", "ZIA AI005081", "AI109762", "1R43AI066487-01")
+              for m in ACKNOWLEDGED_GRANT_RE.finditer(g)]
+    assert parsed == [("K08", "AI079381"), ("T32", "GM007215"), ("ZIA", "AI005081"),
+                      (None, "AI109762"), ("R43", "AI066487")]
+
+
+def test_pubmed_grant_list_is_parsed():
+    import xml.etree.ElementTree as ET
+
+    from core_data_loader.fetchers.pubmed import parse_grant_list
+    art = ET.fromstring(
+        "<PubmedArticle><MedlineCitation><PMID>1</PMID><Article><GrantList>"
+        "<Grant><GrantID>K08-AI079381</GrantID><Acronym>AI</Acronym><Agency>NIAID NIH HHS</Agency></Grant>"
+        "<Grant><Acronym>GM</Acronym></Grant>"
+        "</GrantList></Article></MedlineCitation></PubmedArticle>")
+    assert parse_grant_list(art) == [{"pmid": "1", "grant_id": "K08-AI079381", "acronym": "AI",
+                                      "agency": "NIAID NIH HHS"}]
+
+
+def test_umbrella_contracts_link_nothing_but_one_project_contracts_link_all_its_task_orders():
+    from core_data_loader.etl.evidence import contract_targets
+    contracts = [("261201500003I026100013", 1, "hiv clinical research in west africa"),
+                 ("261201500003I026100033", 2, "emerging viruses"),
+                 ("272201400058C00", 3, "b-cell epitopes"), ("272201400058C10", 4, "b-cell epitopes")]
+    assert contract_targets("HHSN261201500003C", contracts) == set()
+    assert contract_targets("HHSN272201400058C", contracts) == {3, 4}

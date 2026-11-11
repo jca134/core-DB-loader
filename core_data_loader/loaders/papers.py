@@ -35,6 +35,11 @@ METADATA_TABLE = "papers_metadata"
 CITATIONS_FILEPATH = data_path("papers", "paper_citations.csv")
 CITATIONS_TABLE = "papers_citations"
 
+# Written by `filovirus fetch paper-grants`: the grants each paper's PubMed
+# record acknowledges (GrantList).
+GRANTS_FILEPATH = data_path("papers", "paper_grants.csv")
+GRANTS_TABLE = "papers_grants"
+
 
 def main():
     if not FOLDER.is_dir():
@@ -49,6 +54,8 @@ def main():
                             "run `filovirus fetch publication-metadata` to give papers titles and dates")
         batch.load_optional(CITATIONS_FILEPATH, CITATIONS_TABLE,
                             "run `filovirus fetch paper-citations` to add paper -> paper citations")
+        batch.load_optional(GRANTS_FILEPATH, GRANTS_TABLE,
+                            "run `filovirus fetch paper-grants` to add the grants papers acknowledge")
     print("Finished loading papers files.")
 
 
