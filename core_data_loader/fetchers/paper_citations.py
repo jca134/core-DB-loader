@@ -29,13 +29,12 @@ run once and keep the CSV.
 
 import csv
 import http.client
-import threading
 import time
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 
 from core_data_loader.config import data_path
-from core_data_loader.fetchers.pubmed import REQUEST_PAUSE, reference_lists
+from core_data_loader.fetchers.pubmed import REQUEST_PAUSE, reference_lists, with_deadline
 
 CANDIDATE_FILES = [
     data_path("papers", "papers_iedb_rcsb_update", "output_v2", "unique_papers_v2.csv"),
@@ -62,30 +61,10 @@ def candidate_pmids() -> list[str]:
     return sorted(pmids, key=int)
 
 
-def _with_deadline(batch: list[str]) -> dict:
-    """reference_lists(batch), or TimeoutError if it isn't back within DEADLINE."""
-    result = {}
-
-    def run():
-        try:
-            result["value"] = reference_lists(batch)
-        except Exception as e:      # handed back to the caller below
-            result["error"] = e
-
-    worker = threading.Thread(target=run, daemon=True)   # a hung request is abandoned, not joined
-    worker.start()
-    worker.join(DEADLINE)
-    if worker.is_alive():
-        raise TimeoutError(f"no answer within {DEADLINE}s")
-    if "error" in result:
-        raise result["error"]
-    return result["value"]
-
-
 def fetch_batch(batch: list[str]):
     for attempt in range(RETRIES):
         try:
-            return batch, _with_deadline(batch), None
+            return batch, with_deadline(reference_lists, batch, deadline=DEADLINE), None
         except NETWORK_ERRORS as e:
             error = e
             time.sleep(2 * (attempt + 1))

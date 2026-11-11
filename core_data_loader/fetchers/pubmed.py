@@ -8,6 +8,7 @@ that.
 """
 
 import json
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -98,6 +99,42 @@ def fetch_records(pmids: list[str]) -> dict:
             continue
         out[rec["pmid"]] = rec
     return out
+
+
+def with_deadline(fn, *args, deadline: float = 90):
+    """
+    fn(*args), or TimeoutError if it isn't back within `deadline` seconds.
+    NCBI occasionally holds a connection open without answering, which no
+    socket read timeout catches; the call runs in a daemon thread that is
+    abandoned, not joined, when the deadline passes.
+    """
+    result = {}
+
+    def run():
+        try:
+            result["value"] = fn(*args)
+        except Exception as e:      # handed back to the caller below
+            result["error"] = e
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(deadline)
+    if worker.is_alive():
+        raise TimeoutError(f"no answer within {deadline}s")
+    if "error" in result:
+        raise result["error"]
+    return result["value"]
+
+
+def parse_grant_list(art: ET.Element) -> list[dict]:
+    """The grants a PubMed record acknowledges: GrantID, institute acronym, agency."""
+    pmid = art.findtext("MedlineCitation/PMID", "")
+    return [
+        {"pmid": pmid, "grant_id": (g.findtext("GrantID") or "").strip(),
+         "acronym": (g.findtext("Acronym") or "").strip(), "agency": (g.findtext("Agency") or "").strip()}
+        for g in art.findall("MedlineCitation/Article/GrantList/Grant")
+        if (g.findtext("GrantID") or "").strip()
+    ]
 
 
 def _text(el) -> str:
