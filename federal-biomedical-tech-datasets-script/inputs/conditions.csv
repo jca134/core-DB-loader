@@ -1,0 +1,13 @@
+condition_name,search_term,entity_id,requires_context
+Ebola virus disease,Ebola virus disease,,false
+Ebola virus disease,Ebola hemorrhagic fever,,false
+Ebola virus disease,Ebola haemorrhagic fever,,false
+Ebola virus disease,EVD,,true
+Marburg virus disease,Marburg virus disease,,false
+Marburg virus disease,Marburg hemorrhagic fever,,false
+Marburg virus disease,Marburg haemorrhagic fever,,false
+Marburg virus disease,MVD,,true
+Sudan virus disease,Sudan virus disease,,false
+Filovirus disease,filovirus disease,,false
+Viral hemorrhagic fever,viral hemorrhagic fever,,true
+Viral hemorrhagic fever,viral haemorrhagic fever,,true

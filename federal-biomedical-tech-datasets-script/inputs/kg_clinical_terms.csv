@@ -1,0 +1,100 @@
+entity_type,canonical_name,search_term,term_type,scope,requires_context,entity_ids,source,notes
+symptom,Fever,fever,db_name,include,FALSE,HP:0001945,core.symptom (common/clinical_vocab.py),
+symptom,Fever,febrile,synonym,include,FALSE,HP:0001945,core.symptom (common/clinical_vocab.py),
+symptom,Fever,pyrexia,synonym,include,FALSE,HP:0001945,core.symptom (common/clinical_vocab.py),
+symptom,Fever,high fever,synonym,include,FALSE,HP:0001945,core.symptom (common/clinical_vocab.py),
+symptom,Headache,headache,db_name,include,FALSE,HP:0002315,core.symptom (common/clinical_vocab.py),
+symptom,Headache,headaches,synonym,include,FALSE,HP:0002315,core.symptom (common/clinical_vocab.py),
+symptom,Headache,cephalalgia,synonym,include,FALSE,HP:0002315,core.symptom (common/clinical_vocab.py),
+symptom,Malaise,malaise,db_name,include,FALSE,HP:0033834,core.symptom (common/clinical_vocab.py),
+symptom,Vomiting,vomiting,db_name,include,FALSE,HP:0002013,core.symptom (common/clinical_vocab.py),
+symptom,Vomiting,emesis,synonym,include,FALSE,HP:0002013,core.symptom (common/clinical_vocab.py),
+symptom,Diarrhea,diarrhea,db_name,include,FALSE,HP:0002014,core.symptom (common/clinical_vocab.py),
+symptom,Diarrhea,diarrhoea,synonym,include,FALSE,HP:0002014,core.symptom (common/clinical_vocab.py),
+symptom,Diarrhea,diarrhorea,synonym,include,FALSE,HP:0002014,core.symptom (common/clinical_vocab.py),
+symptom,Bloody diarrhea,bloody diarrhea,db_name,include,FALSE,HP:0025085,core.symptom (common/clinical_vocab.py),; kind of Diarrhea
+symptom,Bloody diarrhea,bloody diarrhoea,synonym,include,FALSE,HP:0025085,core.symptom (common/clinical_vocab.py),; kind of Diarrhea
+symptom,Bloody diarrhea,hemorrhagic diarrhea,synonym,include,FALSE,HP:0025085,core.symptom (common/clinical_vocab.py),; kind of Diarrhea
+symptom,Pharyngalgia,pharyngalgia,db_name,include,FALSE,HP:0033050,core.symptom (common/clinical_vocab.py),
+symptom,Pharyngalgia,sore throat,synonym,include,FALSE,HP:0033050,core.symptom (common/clinical_vocab.py),
+symptom,Pharyngalgia,throat pain,synonym,include,FALSE,HP:0033050,core.symptom (common/clinical_vocab.py),
+symptom,Abnormal bleeding,abnormal bleeding,db_name,include,FALSE,HP:0001892,core.symptom (common/clinical_vocab.py),
+symptom,Abnormal bleeding,hemorrhage,synonym,include,FALSE,HP:0001892,core.symptom (common/clinical_vocab.py),
+symptom,Abnormal bleeding,haemorrhage,synonym,include,FALSE,HP:0001892,core.symptom (common/clinical_vocab.py),
+symptom,Abnormal bleeding,bleeding,synonym,include,FALSE,HP:0001892,core.symptom (common/clinical_vocab.py),
+symptom,Abnormal bleeding,hemorrhaging,synonym,include,FALSE,HP:0001892,core.symptom (common/clinical_vocab.py),
+symptom,Liver abscess,liver abscess,db_name,include,FALSE,HP:0100523,core.symptom (common/clinical_vocab.py),
+symptom,Liver abscess,hepatic abscess,synonym,include,FALSE,HP:0100523,core.symptom (common/clinical_vocab.py),
+symptom,Miscarriage,miscarriage,db_name,include,FALSE,HP:0005268,core.symptom (common/clinical_vocab.py),
+symptom,Miscarriage,spontaneous abortion,synonym,include,FALSE,HP:0005268,core.symptom (common/clinical_vocab.py),
+assay_type,T cell epitope assay,t cell epitope assay,db_name,include,FALSE,OBI:0003128,core.assay_type (common/clinical_vocab.py),
+assay_type,T cell epitope assay,t cell assay,synonym,include,FALSE,OBI:0003128,core.assay_type (common/clinical_vocab.py),
+assay_type,B cell epitope assay,b cell epitope assay,db_name,include,FALSE,OBI:0003127,core.assay_type (common/clinical_vocab.py),
+assay_type,B cell epitope assay,b cell assay,synonym,include,FALSE,OBI:0003127,core.assay_type (common/clinical_vocab.py),
+assay_type,MHC ligand assay,mhc ligand assay,db_name,include,FALSE,OBI:0002075,core.assay_type (common/clinical_vocab.py),
+assay_type,MHC ligand assay,mhc binding,synonym,include,FALSE,OBI:0002075,core.assay_type (common/clinical_vocab.py),
+assay_type,MHC ligand assay,mhc binding assay,synonym,include,FALSE,OBI:0002075,core.assay_type (common/clinical_vocab.py),
+assay_type,Enzyme-linked immunospot assay,enzyme-linked immunospot assay,db_name,include,FALSE,OBI:0600031,core.assay_type (common/clinical_vocab.py),
+assay_type,Enzyme-linked immunospot assay,elispot,synonym,include,FALSE,OBI:0600031,core.assay_type (common/clinical_vocab.py),
+assay_type,Enzyme-linked immunospot assay,eli-spot,synonym,include,FALSE,OBI:0600031,core.assay_type (common/clinical_vocab.py),
+assay_type,Enzyme-linked immunospot assay,enzyme-linked immunospot,synonym,include,FALSE,OBI:0600031,core.assay_type (common/clinical_vocab.py),
+assay_type,Intracellular cytokine staining assay,intracellular cytokine staining assay,db_name,include,FALSE,,core.assay_type (common/clinical_vocab.py),no OBI term at this granularity
+assay_type,Intracellular cytokine staining assay,intracellular cytokine staining,synonym,include,FALSE,,core.assay_type (common/clinical_vocab.py),no OBI term at this granularity
+assay_type,Intracellular cytokine staining assay,ics,synonym,include,TRUE,,core.assay_type (common/clinical_vocab.py),no OBI term at this granularity
+assay_type,Intracellular cytokine staining assay,icc,synonym,include,TRUE,,core.assay_type (common/clinical_vocab.py),no OBI term at this granularity
+assay_type,In vitro T cell killing assay,in vitro t cell killing assay,db_name,include,FALSE,OBI:0002062,core.assay_type (common/clinical_vocab.py),
+assay_type,In vitro T cell killing assay,lytic activity,synonym,include,FALSE,OBI:0002062,core.assay_type (common/clinical_vocab.py),
+assay_type,In vitro T cell killing assay,lytic function,synonym,include,FALSE,OBI:0002062,core.assay_type (common/clinical_vocab.py),
+assay_type,In vitro T cell killing assay,cytotoxicity assay,synonym,include,FALSE,OBI:0002062,core.assay_type (common/clinical_vocab.py),
+assay_type,In vitro T cell killing assay,chromium release,synonym,include,FALSE,OBI:0002062,core.assay_type (common/clinical_vocab.py),
+assay_type,In vitro T cell killing assay,ctl killing,synonym,include,FALSE,OBI:0002062,core.assay_type (common/clinical_vocab.py),
+assay_type,MHC tetramer assay,mhc tetramer assay,db_name,include,FALSE,OBI:1110179,core.assay_type (common/clinical_vocab.py),
+assay_type,MHC tetramer assay,tetramer staining,synonym,include,FALSE,OBI:1110179,core.assay_type (common/clinical_vocab.py),
+assay_type,MHC tetramer assay,mhc tetramer,synonym,include,FALSE,OBI:1110179,core.assay_type (common/clinical_vocab.py),
+assay_type,MHC tetramer assay,mhc multimer,synonym,include,FALSE,OBI:1110179,core.assay_type (common/clinical_vocab.py),
+assay_type,MHC tetramer assay,tetramer,synonym,include,FALSE,OBI:1110179,core.assay_type (common/clinical_vocab.py),
+assay_type,Enzyme-linked immunosorbent assay,enzyme-linked immunosorbent assay,db_name,include,FALSE,OBI:0000661,core.assay_type (common/clinical_vocab.py),
+assay_type,Enzyme-linked immunosorbent assay,elisa,synonym,include,FALSE,OBI:0000661,core.assay_type (common/clinical_vocab.py),
+assay_type,Polymerase chain reaction assay,polymerase chain reaction assay,db_name,include,FALSE,OBI:0002692,core.assay_type (common/clinical_vocab.py),
+assay_type,Polymerase chain reaction assay,pcr,synonym,include,TRUE,OBI:0002692,core.assay_type (common/clinical_vocab.py),
+assay_type,Polymerase chain reaction assay,polymerase chain reaction,synonym,include,FALSE,OBI:0002692,core.assay_type (common/clinical_vocab.py),
+assay_type,Polymerase chain reaction assay,rt-pcr,synonym,include,FALSE,OBI:0002692,core.assay_type (common/clinical_vocab.py),
+assay_type,Polymerase chain reaction assay,qpcr,synonym,include,TRUE,OBI:0002692,core.assay_type (common/clinical_vocab.py),
+assay_type,Pathogen neutralization assay,pathogen neutralization assay,db_name,include,FALSE,OBI:0003796,core.assay_type (common/clinical_vocab.py),
+assay_type,Pathogen neutralization assay,neutralization assay,synonym,include,FALSE,OBI:0003796,core.assay_type (common/clinical_vocab.py),
+assay_type,Pathogen neutralization assay,neutralisation assay,synonym,include,FALSE,OBI:0003796,core.assay_type (common/clinical_vocab.py),
+assay_type,Pathogen neutralization assay,virus neutralization,synonym,include,FALSE,OBI:0003796,core.assay_type (common/clinical_vocab.py),
+assay_type,Pathogen neutralization assay,neutralizing antibody assay,synonym,include,FALSE,OBI:0003796,core.assay_type (common/clinical_vocab.py),
+assay_type,Pseudovirus neutralization assay,pseudovirus neutralization assay,db_name,include,FALSE,,core.assay_type (common/clinical_vocab.py),no OBI term at this granularity; kind of Pathogen neutralization assay
+assay_type,Pseudovirus neutralization assay,pseudovirus neutralization,synonym,include,FALSE,,core.assay_type (common/clinical_vocab.py),no OBI term at this granularity; kind of Pathogen neutralization assay
+assay_type,Pseudovirus neutralization assay,pseudotyped virus neutralization,synonym,include,FALSE,,core.assay_type (common/clinical_vocab.py),no OBI term at this granularity; kind of Pathogen neutralization assay
+assay_type,Chemiluminescent assay,chemiluminescent assay,db_name,include,FALSE,OBI:0003779,core.assay_type (common/clinical_vocab.py),
+assay_type,Chemiluminescent assay,chemiluminescence assay,synonym,include,FALSE,OBI:0003779,core.assay_type (common/clinical_vocab.py),
+assay_type,B cell receptor repertoire sequencing assay,b cell receptor repertoire sequencing assay,db_name,include,FALSE,OBI:0002991,core.assay_type (common/clinical_vocab.py),
+assay_type,B cell receptor repertoire sequencing assay,bcr repertoire sequencing,synonym,include,FALSE,OBI:0002991,core.assay_type (common/clinical_vocab.py),
+assay_type,B cell receptor repertoire sequencing assay,bcr-seq,synonym,include,FALSE,OBI:0002991,core.assay_type (common/clinical_vocab.py),
+assay_type,Transcription profiling by array assay,transcription profiling by array assay,db_name,include,FALSE,OBI:0001463,core.assay_type (common/clinical_vocab.py),
+assay_type,Transcription profiling by array assay,transcription profiling by array,synonym,include,FALSE,OBI:0001463,core.assay_type (common/clinical_vocab.py),
+assay_type,Transcription profiling by array assay,gene expression microarray,synonym,include,FALSE,OBI:0001463,core.assay_type (common/clinical_vocab.py),
+assay_type,Transcription profiling by array assay,expression microarray,synonym,include,FALSE,OBI:0001463,core.assay_type (common/clinical_vocab.py),
+condition,Ebola virus disease,ebola virus disease,db_name,include,FALSE,DOID:4325,Disease Ontology / MONDO (common/clinical_vocab.py),in core.condition (ImmPort label: Ebola hemorrhagic fever)
+condition,Ebola virus disease,ebola hemorrhagic fever,synonym,include,FALSE,DOID:4325,Disease Ontology / MONDO (common/clinical_vocab.py),in core.condition (ImmPort label: Ebola hemorrhagic fever)
+condition,Ebola virus disease,ebola haemorrhagic fever,synonym,include,FALSE,DOID:4325,Disease Ontology / MONDO (common/clinical_vocab.py),in core.condition (ImmPort label: Ebola hemorrhagic fever)
+condition,Ebola virus disease,ebola disease,synonym,include,FALSE,DOID:4325,Disease Ontology / MONDO (common/clinical_vocab.py),in core.condition (ImmPort label: Ebola hemorrhagic fever)
+condition,Ebola virus disease,evd,synonym,include,TRUE,DOID:4325,Disease Ontology / MONDO (common/clinical_vocab.py),in core.condition (ImmPort label: Ebola hemorrhagic fever)
+condition,Ebola virus disease,ebola,synonym,exclude,TRUE,DOID:4325,Disease Ontology / MONDO (common/clinical_vocab.py),in core.condition (ImmPort label: Ebola hemorrhagic fever)
+condition,Marburg virus disease,marburg virus disease,db_name,include,FALSE,DOID:4327,Disease Ontology / MONDO (common/clinical_vocab.py),DOID label: Marburg hemorrhagic fever; not yet in core.condition
+condition,Marburg virus disease,marburg hemorrhagic fever,synonym,include,FALSE,DOID:4327,Disease Ontology / MONDO (common/clinical_vocab.py),DOID label: Marburg hemorrhagic fever; not yet in core.condition
+condition,Marburg virus disease,marburg haemorrhagic fever,synonym,include,FALSE,DOID:4327,Disease Ontology / MONDO (common/clinical_vocab.py),DOID label: Marburg hemorrhagic fever; not yet in core.condition
+condition,Marburg virus disease,marburg disease,synonym,include,FALSE,DOID:4327,Disease Ontology / MONDO (common/clinical_vocab.py),DOID label: Marburg hemorrhagic fever; not yet in core.condition
+condition,Marburg virus disease,mvd,synonym,include,TRUE,DOID:4327,Disease Ontology / MONDO (common/clinical_vocab.py),DOID label: Marburg hemorrhagic fever; not yet in core.condition
+condition,Sudan virus disease,sudan virus disease,db_name,include,FALSE,DOID:4325,Disease Ontology / MONDO (common/clinical_vocab.py),no DOID/MONDO term of its own; DOID:4325's definition includes Sudan virus
+condition,Sudan virus disease,sudan ebola virus disease,synonym,include,FALSE,DOID:4325,Disease Ontology / MONDO (common/clinical_vocab.py),no DOID/MONDO term of its own; DOID:4325's definition includes Sudan virus
+condition,Sudan virus disease,svd,synonym,review,TRUE,DOID:4325,Disease Ontology / MONDO (common/clinical_vocab.py),no DOID/MONDO term of its own; DOID:4325's definition includes Sudan virus
+condition,Filovirus disease,filovirus disease,db_name,review,FALSE,DOID:4325|DOID:4327,Disease Ontology / MONDO (common/clinical_vocab.py),no DOID/MONDO term; DOID goes EVD -> viral infectious disease. Mapped to both member diseases
+condition,Filovirus disease,filoviral disease,synonym,review,FALSE,DOID:4325|DOID:4327,Disease Ontology / MONDO (common/clinical_vocab.py),no DOID/MONDO term; DOID goes EVD -> viral infectious disease. Mapped to both member diseases
+condition,Filovirus disease,filovirus infection,synonym,review,FALSE,DOID:4325|DOID:4327,Disease Ontology / MONDO (common/clinical_vocab.py),no DOID/MONDO term; DOID goes EVD -> viral infectious disease. Mapped to both member diseases
+condition,Viral hemorrhagic fever,viral hemorrhagic fever,db_name,include,FALSE,MONDO:0018087,Disease Ontology / MONDO (common/clinical_vocab.py),"not in DOID; MONDO id. Broad: also covers Lassa, dengue, CCHF -- a hub, not a link between documents"
+condition,Viral hemorrhagic fever,viral haemorrhagic fever,synonym,include,FALSE,MONDO:0018087,Disease Ontology / MONDO (common/clinical_vocab.py),"not in DOID; MONDO id. Broad: also covers Lassa, dengue, CCHF -- a hub, not a link between documents"
+condition,Viral hemorrhagic fever,viral hemorrhagic fevers,synonym,include,FALSE,MONDO:0018087,Disease Ontology / MONDO (common/clinical_vocab.py),"not in DOID; MONDO id. Broad: also covers Lassa, dengue, CCHF -- a hub, not a link between documents"
+condition,Viral hemorrhagic fever,vhf,synonym,include,TRUE,MONDO:0018087,Disease Ontology / MONDO (common/clinical_vocab.py),"not in DOID; MONDO id. Broad: also covers Lassa, dengue, CCHF -- a hub, not a link between documents"
