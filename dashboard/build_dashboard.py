@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Build the research dashboard (dashboard/output/research_dashboard.html).
 
-One page with a tab for each collection (grants, papers, patents) and for each
-pair of them. Inputs:
+One page. The first tab, "Explore the graph", searches the whole knowledge graph
+and exports the subgraph around any record; its data comes from Neo4j through
+build_explorer.py (see there). The other tabs cover each document collection
+(grants, papers, patents) and each pair of them. Their inputs:
 
   data/      the shared source folder (docs/data-sources.md; FILOVIRUS_DATA_DIR
              overrides it): RePORTER publication lists, the PubMed records of
@@ -54,8 +56,11 @@ GRANTS_OUT = GRANTS_WS / "output"
 PATENT_WS = REPO / "patent_pipeline" / "data" / "processed"
 TEMPLATE = HERE / "dashboard.template.html"
 OUT = HERE / "output" / "research_dashboard.html"
+# Checked-in copies of both data sets, so a fresh clone can rebuild the page with
+# neither the workstreams' files nor Neo4j. Every full build refreshes them.
+DOC_SNAPSHOT = HERE / "snapshot" / "documents.json.gz"
 
-sys.path[:0] = [str(REPO), str(GRANTS_WS)]
+sys.path[:0] = [str(REPO), str(GRANTS_WS), str(HERE)]
 from core_data_loader.etl.evidence import (  # noqa: E402
     AWARD_SERIAL_RE, CONTRACT_IN_TEXT_RE, contract_targets, is_filovirus_paper,
     normalize_document_id, parse_grant_numbers,
@@ -371,7 +376,8 @@ def build_patents():
 # Links
 # ---------------------------------------------------------------------------
 
-def main():
+def document_data() -> dict:
+    """The document tabs' data, built from the workstreams' files."""
     print(f"Reading {DATA}")
     grants, g_idx, awards = build_grants()
     papers = build_papers()
@@ -478,12 +484,6 @@ def main():
         "grants": grants, "papers": P, "patents": patents,
         "gp": gp, "tp": tp, "tx": tx, "gt": gt, "pc": [list(x) for x in pc], "tc": [list(x) for x in tc],
     }
-    html = TEMPLATE.read_text(encoding="utf-8").replace(
-        "/*__DATA__*/null", json.dumps(data, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/"))
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(html, encoding="utf-8")
-
-    print(f"Wrote {OUT.relative_to(REPO)} ({len(html) / 1024:.0f} KB)")
     print(f"  {len(grants)} grants, {len(P)} papers, {len(patents)} patents")
     print(f"  grant-paper {len(gp)}, patent-paper {len(tp)} in set + {len(tx)} outside, grant-patent {len(gt)} "
           f"({len({l[1] for l in gt})} patents, {sum(1 for t in patents if t['gi'])} with a federal-support statement)")
@@ -492,6 +492,43 @@ def main():
         print("  dropped (an end is not in the dataset):", dict(dropped))
     if unmapped:
         print("  names not mapped to a virus or protein:", dict(unmapped.most_common(15)), file=sys.stderr)
+    return data
+
+
+def main():
+    import build_explorer
+
+    # Document tabs: from the workstreams' files when they're here (and the snapshot is
+    # refreshed from them), otherwise from the checked-in snapshot.
+    try:
+        data = document_data()
+        build_explorer.write_snapshot(DOC_SNAPSHOT, data)
+        print(f"  saved {DOC_SNAPSHOT.relative_to(REPO)} (commit it so anyone can rebuild the page)")
+    except FileNotFoundError as e:
+        if not DOC_SNAPSHOT.exists():
+            raise
+        data = build_explorer.read_snapshot(DOC_SNAPSHOT)
+        print(f"Document tabs: {Path(e.filename).relative_to(REPO) if e.filename else e} is missing, "
+              f"so using {DOC_SNAPSHOT.relative_to(REPO)} (built {data['built']})")
+
+    # Explore tab: from Neo4j when it's running (and the snapshot is refreshed), otherwise
+    # from the checked-in snapshot.
+    try:
+        graph = build_explorer.graph_data()
+        build_explorer.write_snapshot(build_explorer.SNAPSHOT, graph)
+        print(f"  saved {build_explorer.SNAPSHOT.relative_to(REPO)}")
+    except Exception as e:  # noqa: BLE001 -- any Neo4j failure means: use the snapshot
+        graph = build_explorer.read_snapshot(build_explorer.SNAPSHOT)
+        print(f"Graph: Neo4j not reachable ({type(e).__name__}), so using "
+              f"{build_explorer.SNAPSHOT.relative_to(REPO)} (built {graph['built']})")
+
+    html = TEMPLATE.read_text(encoding="utf-8").replace(
+        "/*__DATA__*/null", json.dumps(data, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/"))
+    html = build_explorer.embed(html, graph)
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(html, encoding="utf-8")
+    print(f"Wrote {OUT.relative_to(REPO)} ({len(html.encode()) / 2**20:.1f} MB)")
+    print(build_explorer.summary(graph))
 
 
 if __name__ == "__main__":

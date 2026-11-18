@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Filovirus Research Dashboard</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -196,16 +197,118 @@ footer b { color: var(--fg); font-weight: 500; }
 }
 @media (max-width: 420px) { .tile .v { font-size: 24px; } }
 @media (prefers-reduced-motion: no-preference) { .tab, .hb, .btn { transition: background-color .15s, border-color .15s; } }
+
+/* ---------- graph explorer ----------
+   Search sits on top like a lookup desk; settings in one row; summary, then the drawing beside the
+   selected node's record; export and the full node table below. Node colors: one hue per kind of
+   record (validated with the dataviz validator, both themes); organizations stay neutral. */
+:root {
+  --g-virus: #2a78d6; --g-patent: #c25a1c; --g-grant: #008a6e; --g-immune: #b8860b;
+  --g-paper: #5a52c9; --g-protein: #d0457f; --g-clinical: #5f8f1f; --g-org: #8b9690;
+  --g-edge: rgba(40, 56, 50, .18); --g-edge-hi: #0e6b5f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --g-virus: #3987e5; --g-patent: #d66f33; --g-grant: #22a088; --g-immune: #b8891a;
+    --g-paper: #8a84ee; --g-protein: #d55181; --g-clinical: #5f9a2a; --g-org: #6f7a75;
+    --g-edge: rgba(200, 220, 212, .16); --g-edge-hi: #4fc0ad;
+  }
+}
+:root[data-theme="dark"] {
+  --g-virus: #3987e5; --g-patent: #d66f33; --g-grant: #22a088; --g-immune: #b8891a;
+  --g-paper: #8a84ee; --g-protein: #d55181; --g-clinical: #5f9a2a; --g-org: #6f7a75;
+  --g-edge: rgba(200, 220, 212, .16); --g-edge-hi: #4fc0ad;
+}
+.x-search { display: grid; gap: 8px; }
+.x-qlabel { font-size: 13px; color: var(--muted); }
+.x-combo { position: relative; }
+#x-q { width: 100%; font-size: 17px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--rule); border-bottom: 2px solid var(--fg); background: var(--surface); color: var(--fg); font-family: var(--font-body); }
+#x-q:focus { outline: none; border-color: var(--accent); }
+#x-sug { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.14); max-height: 420px; overflow-y: auto; }
+#x-sug li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 4px 10px; align-items: baseline; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+#x-sug li[aria-selected="true"], #x-sug li:hover { background: var(--chip); }
+#x-sug .nm { overflow-wrap: anywhere; min-width: 0; }
+#x-sug .mt { grid-column: 2 / 4; font-size: 12px; color: var(--muted); font-family: var(--font-mono); overflow-wrap: anywhere; }
+#x-sug .dg { font-size: 12px; color: var(--muted); font-family: var(--font-mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.gdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; align-self: center; }
+.x-examples { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+.x-examples button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--surface); color: var(--fg); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.x-examples button:hover { border-color: var(--accent); }
+.x-controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: end; padding: 12px 0; border-top: 2px solid var(--fg); border-bottom: 1px solid var(--rule); }
+.x-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; padding-bottom: 6px; }
+.x-groups { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; }
+.x-groups button { font: inherit; font-size: 12px; padding: 3px 10px 3px 8px; border-radius: 999px; border: 1px solid var(--rule); background: var(--surface); color: var(--fg); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.x-groups button[aria-pressed="false"] { color: var(--muted); background: transparent; border-style: dashed; }
+.x-groups button[aria-pressed="false"] .gdot { opacity: .3; }
+.x-groups .n { font-family: var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.x-summary { display: grid; gap: 12px; }
+.x-title { display: grid; gap: 4px; }
+.x-title h2 { font-size: clamp(22px, 3vw, 28px); overflow-wrap: anywhere; }
+.x-title p { margin: 0; font-size: 13px; color: var(--muted); max-width: 80ch; }
+.x-main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
+.x-canvas-wrap { position: relative; height: 560px; border-radius: 8px; background: var(--bg); overflow: hidden; touch-action: none; }
+#x-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+#x-canvas:active { cursor: grabbing; }
+.x-gbtns { display: flex; flex-wrap: wrap; gap: 6px; }
+.x-crumbs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
+.x-crumbs b { font-weight: 500; }
+.x-crumb { font: inherit; font-size: 13px; background: none; border: 0; padding: 2px 4px; color: var(--fg); cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+.x-crumb:hover { text-decoration-color: var(--accent); }
+.x-chipx { font: inherit; font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--fg); cursor: pointer; }
+.x-sep { width: 1px; height: 16px; background: var(--rule); margin: 0 4px; }
+.x-mode { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.x-mode button { font: inherit; font-size: 13px; padding: 6px 12px; border: 0; background: var(--surface); color: var(--muted); cursor: pointer; }
+.x-mode button + button { border-left: 1px solid var(--rule); }
+.x-mode button[aria-pressed="true"] { background: var(--accent-soft); color: var(--fg); font-weight: 500; }
+.x-detail { max-height: 640px; overflow-y: auto; }
+.x-detail h3 { margin-top: 4px; }
+.x-detail .x-name { font-family: var(--font-display); font-size: 19px; font-weight: 500; line-height: 1.25; margin: 0; overflow-wrap: anywhere; }
+.x-kind { display: inline-flex; gap: 6px; align-items: center; font-family: var(--font-mono); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.x-props { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 10px; margin: 0; font-size: 12px; }
+.x-props dt { color: var(--muted); font-family: var(--font-mono); }
+.x-props dd { margin: 0; overflow-wrap: anywhere; }
+.x-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.x-nb { display: grid; gap: 2px; }
+.x-nb button { font: inherit; font-size: 12px; text-align: left; background: none; border: 0; padding: 3px 4px; margin: 0 -4px; border-radius: 4px; color: var(--fg); cursor: pointer; display: flex; gap: 6px; align-items: baseline; }
+.x-nb button:hover { background: var(--chip); }
+.x-nb button span { overflow-wrap: anywhere; min-width: 0; }
+.x-rel { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 6px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 500; }
+.btn.primary:hover { filter: brightness(1.08); }
+.x-exbtns { display: flex; flex-wrap: wrap; gap: 6px; }
+#x-extext { width: 100%; font-family: var(--font-mono); font-size: 12px; background: var(--bg); color: var(--fg); border: 1px solid var(--rule); border-radius: 6px; padding: 8px; }
+.x-tfilters { display: flex; flex-wrap: wrap; gap: 6px; flex: 0 1 460px; }
+.x-tfilters input { flex: 1 1 200px; min-width: 0; }
+table.data tr.x-row { cursor: pointer; }
+table.data tr.x-row:hover td { background: var(--chip); }
+table.data tr.x-row[aria-selected="true"] td { background: var(--accent-soft); }
+code { font-family: var(--font-mono); font-size: .92em; background: var(--chip); padding: 1px 5px; border-radius: 4px; }
+@media (max-width: 960px) {
+  .x-main { grid-template-columns: minmax(0, 1fr); }
+  .x-detail { max-height: none; }
+}
+@media (max-width: 600px) { .x-canvas-wrap { height: 400px; } #x-q { font-size: 16px; } }
 </style>
 
 <div class="wrap">
   <header>
-    <div class="eyebrow">Filovirus knowledge graph · NIH grants · PubMed papers · US patents</div>
+    <div class="eyebrow">Filovirus knowledge graph · viruses · proteins · epitopes · grants · papers · patents</div>
     <h1>Filovirus Research Dashboard</h1>
-    <p class="lede">The three document collections behind the knowledge graph, and the links between them. <b>Filters apply to every tab.</b> A link is counted when both of its ends pass the filters.</p>
+    <p class="lede"><b>Explore the graph</b> pulls out everything connected to one virus, protein, gene, epitope, antibody or document, and exports it. The other tabs summarize the three document collections (NIH grants, PubMed papers, US patents) and the links between them; their filters apply to those tabs only.</p>
   </header>
 
-  <div class="filters" role="group" aria-label="Filters">
+  <nav class="tabs" role="tablist" aria-label="Views" id="tabs">
+    <a class="tab" role="tab" href="#explore" data-view="explore">Explore the graph</a>
+    <a class="tab" role="tab" href="#overview" data-view="overview">Documents overview</a>
+    <a class="tab" role="tab" href="#grants" data-view="grants"><i class="dotk dk-grant"></i>Grants</a>
+    <a class="tab" role="tab" href="#papers" data-view="papers"><i class="dotk dk-paper"></i>Papers</a>
+    <a class="tab" role="tab" href="#patents" data-view="patents"><i class="dotk dk-patent"></i>Patents</a>
+    <a class="tab" role="tab" href="#grants-papers" data-view="grants-papers">Grants <span class="sep">×</span> Papers</a>
+    <a class="tab" role="tab" href="#patents-papers" data-view="patents-papers">Patents <span class="sep">×</span> Papers</a>
+    <a class="tab" role="tab" href="#grants-patents" data-view="grants-patents">Grants <span class="sep">×</span> Patents</a>
+  </nav>
+
+  <div class="filters" id="doc-filters" role="group" aria-label="Document filters">
     <label class="field">Virus
       <select id="f-virus"><option value="">Any virus</option></select>
     </label>
@@ -221,15 +324,80 @@ footer b { color: var(--fg); font-weight: 500; }
     <div class="scope" id="scope" aria-live="polite"></div>
   </div>
 
-  <nav class="tabs" role="tablist" aria-label="Views" id="tabs">
-    <a class="tab" role="tab" href="#overview" data-view="overview">Overview</a>
-    <a class="tab" role="tab" href="#grants" data-view="grants"><i class="dotk dk-grant"></i>Grants</a>
-    <a class="tab" role="tab" href="#papers" data-view="papers"><i class="dotk dk-paper"></i>Papers</a>
-    <a class="tab" role="tab" href="#patents" data-view="patents"><i class="dotk dk-patent"></i>Patents</a>
-    <a class="tab" role="tab" href="#grants-papers" data-view="grants-papers">Grants <span class="sep">×</span> Papers</a>
-    <a class="tab" role="tab" href="#patents-papers" data-view="patents-papers">Patents <span class="sep">×</span> Papers</a>
-    <a class="tab" role="tab" href="#grants-patents" data-view="grants-patents">Grants <span class="sep">×</span> Patents</a>
-  </nav>
+  <!-- EXPLORE -->
+  <section class="view" id="v-explore" role="tabpanel" aria-label="Explore the graph" hidden>
+    <div class="x-search">
+      <label class="x-qlabel" for="x-q">Find a virus, protein, gene, epitope, antibody, grant, paper or patent</label>
+      <div class="x-combo">
+        <input type="search" id="x-q" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="x-sug" aria-autocomplete="list"
+               placeholder="Try Marburg, VP35, KZ52, Inmazeb, 3CSY, a PMID or a grant number">
+        <ul id="x-sug" role="listbox" hidden></ul>
+      </div>
+      <div class="x-examples" id="x-examples" aria-label="Examples"></div>
+    </div>
+
+    <div class="x-controls" role="group" aria-label="Subgraph settings">
+      <label class="field">Steps out
+        <select id="x-hops"><option value="1">1 step</option><option value="2" selected>2 steps</option><option value="3">3 steps</option></select>
+      </label>
+      <label class="field">Stop at hubs with more than
+        <select id="x-hub"><option value="25">25 links</option><option value="100" selected>100 links</option><option value="500">500 links</option><option value="0">No limit</option></select>
+      </label>
+      <label class="x-check"><input type="checkbox" id="x-sub" checked> Include sub-taxa and strains of a virus</label>
+      <div class="x-groups" id="x-groups" role="group" aria-label="Node types to include"></div>
+    </div>
+
+    <div class="x-summary">
+      <div class="x-title"><span class="eyebrow" id="x-seedkind"></span><h2 id="x-seedname"></h2><p id="x-seednote"></p></div>
+      <div class="tiles" id="x-tiles"></div>
+      <div class="seg" id="x-seg" aria-hidden="true"></div>
+      <div class="legend" id="x-legend"></div>
+    </div>
+
+    <div class="x-main">
+      <div class="panel x-graph">
+        <div class="panel-head"><h2>Subgraph</h2>
+          <div class="x-gbtns"><div class="x-mode" role="group" aria-label="Drawing"><button type="button" data-mode="type" aria-pressed="true">By type</button><button type="button" data-mode="record" aria-pressed="false">Every record</button></div><button class="btn" type="button" id="x-fit">Fit to view</button><button class="btn" type="button" id="x-relayout">Shake layout</button></div>
+        </div>
+        <div class="x-crumbs" id="x-crumbs" hidden></div>
+        <div class="x-canvas-wrap"><canvas id="x-canvas" aria-label="Network drawing of the subgraph. The table below lists the same nodes."></canvas></div>
+        <p class="note" id="x-drawnote"></p>
+      </div>
+      <aside class="panel x-detail" id="x-detail" aria-live="polite"></aside>
+    </div>
+
+    <div class="panel x-export">
+      <div class="panel-head"><h2>Export this subgraph</h2><span class="sub" id="x-exsize"></span></div>
+      <p>Every format holds all the nodes and links listed below, not only the ones drawn. The Cypher query returns the same subgraph from the project's Neo4j database (paste it into Neo4j Browser at localhost:7474).</p>
+      <div class="x-exbtns">
+        <button class="btn primary" type="button" data-ex="zip">All formats (.zip)</button>
+        <button class="btn" type="button" data-ex="json">JSON</button>
+        <button class="btn" type="button" data-ex="nodes">Nodes CSV</button>
+        <button class="btn" type="button" data-ex="edges">Links CSV</button>
+        <button class="btn" type="button" data-ex="graphml">GraphML</button>
+        <button class="btn" type="button" data-ex="cypher">Cypher query</button>
+        <button class="btn" type="button" id="x-copycy">Copy Cypher</button>
+      </div>
+      <p class="note" id="x-exstat" role="status"></p>
+      <div id="x-exfallback" hidden>
+        <textarea id="x-extext" readonly rows="8" aria-label="Export text"></textarea>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="tbl-head"><h2>Nodes in this subgraph</h2>
+        <div class="x-tfilters">
+          <select id="x-tgroup" aria-label="Filter by type"><option value="">All types</option></select>
+          <input type="search" id="x-tq" placeholder="Filter by name or id" aria-label="Filter nodes">
+        </div>
+      </div>
+      <div id="x-table"></div>
+    </div>
+    <div class="panel x-empty" id="x-nograph" hidden>
+      <h2>The graph data isn't in this build</h2>
+      <p>Run <code>filovirus export</code> to fill Neo4j, then <code>python dashboard/build_explorer.py</code> to add it to this page.</p>
+    </div>
+  </section>
 
   <!-- OVERVIEW -->
   <section class="view" id="v-overview" role="tabpanel" aria-label="Overview">
@@ -373,12 +541,15 @@ footer b { color: var(--fg); font-weight: 500; }
   <footer>
     <div><b>Sources.</b> Grants: NIH RePORTER projects and publications (federal-biomedical-tech-datasets-script). Papers: the papers workstream's bundle, and PubMed records of grant-cited and patent-cited papers, with their grant lists and reference lists. Patents: USPTO Patent Public Search and Google Patents, including each patent's government-interest statement and citation tables (patent_pipeline, filovirus fetch patent-details).</div>
     <div><b>Grant years</b> are the project start and end dates. 106 grants have none in RePORTER, so their first and last fiscal year in the pull is used (marked “fiscal years” in the Grants table).</div>
+    <div><b>Explore the graph</b> uses the knowledge graph itself (Postgres core.* exported to Neo4j): taxa, isolates, sequences, proteins, gene families, structures, epitopes and assays, antibodies, countermeasures, clinical studies, and the same grants, papers and patents. A step is one relationship in either direction. Hubs, such as a gene family that every protein of every filovirus points to, are kept but not walked through, so one gene family doesn't pull in tens of thousands of proteins.</div>
     <div><b>Viruses and proteins</b> come from each workstream's own keyword matching against the knowledge graph vocabulary (kg_keywords.csv), mapped onto one list here: Ebola viruses, Marburg viruses, the filovirus family named generally, and the nine filovirus proteins. Patent matches are candidates; some are flagged for review.</div>
     <div id="built"></div>
   </footer>
 </div>
 <div id="tip" hidden></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 const D = /*__DATA__*/null;
 const $ = (id) => document.getElementById(id);
@@ -776,13 +947,736 @@ function viewGrantsPatents() {
   ], { empty: "No grant → paper → patent paths match the filters.", sortDefault: ["patent", -1] });
 }
 
+// ---------- graph explorer ----------
+// The graph (Neo4j export, trimmed by build_explorer.py): nodes [label, key, name, props|0, aliases],
+// edges flat [source, target, relType, ...], eprops {edgeIndex: [confidence, matched_terms, support]}.
+const KG = null;  // filled by build_explorer.py
+const XGROUPS = [
+  ["virus", "Viruses & disease", ["Taxon", "Isolate", "Condition", "Symptom"]],
+  ["protein", "Genes & proteins", ["Gene", "GeneFamily", "GeneDomain", "Protein", "Structure", "Sequence", "Feature", "Alignment"]],
+  ["immune", "Immunology & countermeasures", ["Epitope", "EpitopeAssay", "Antibody", "AssayType", "Countermeasure"]],
+  ["clinical", "Clinical studies", ["Study", "StudyArm", "Subject", "ImmuneExposure", "Biosample", "Treatment", "Experiment", "ExperimentSample", "Protocol"]],
+  ["grant", "Grants", ["Grant", "GrantFunding"]],
+  ["paper", "Papers", ["Publication"]],
+  ["patent", "Patents", ["Patent"]],
+  ["org", "Organizations", ["Organization"]],
+];
+const XLNAME = { Publication: "Paper", GrantFunding: "Grant funding year", EpitopeAssay: "Epitope assay", GeneFamily: "Gene family", GeneDomain: "Gene domain", AssayType: "Assay type", StudyArm: "Study arm", ImmuneExposure: "Immune exposure", ExperimentSample: "Experiment sample", Taxon: "Virus taxon" };
+const lname = (l) => XLNAME[l] || l;
+// Search ranking: records people look up by name come before bulk records with generic names.
+const XPRI = { Taxon: 0, GeneFamily: 0, Gene: 1, Countermeasure: 1, Antibody: 1, Condition: 1, Symptom: 1, Structure: 2, Epitope: 2, Grant: 2, Publication: 2, Patent: 2, Organization: 2, AssayType: 2, Study: 2, GeneDomain: 3, Isolate: 4, Protein: 5, Sequence: 5, EpitopeAssay: 5, GrantFunding: 5, Feature: 5 };
+const XCAP = 30000, XDRAW = 1500, XEXP = 300;
+
+const X = KG && (() => {
+  const N = KG.nodes.length, E = KG.edges.length / 3, ed = KG.edges;
+  const gOf = {}; XGROUPS.forEach(([, , ls], gi) => ls.forEach((l) => (gOf[l] = gi)));
+  const labGrp = KG.labels.map((l) => gOf[l] ?? 7);
+  const grp = new Uint8Array(N), deg = new Uint32Array(N);
+  KG.nodes.forEach((n, i) => (grp[i] = labGrp[n[0]]));
+  for (let e = 0; e < E; e++) { deg[ed[3 * e]]++; deg[ed[3 * e + 1]]++; }
+  const off = new Uint32Array(N + 1);
+  for (let i = 0; i < N; i++) off[i + 1] = off[i] + deg[i];
+  const fill = off.slice(0, N), nb = new Uint32Array(2 * E), ne = new Uint32Array(2 * E);
+  for (let e = 0; e < E; e++) {
+    const a = ed[3 * e], b = ed[3 * e + 1];
+    nb[fill[a]] = b; ne[fill[a]++] = e; nb[fill[b]] = a; ne[fill[b]++] = e;
+  }
+  const hay = KG.nodes.map((n) => `${n[2]} | ${n[1]} | ${n[4]} | ${n[3] ? Object.values(n[3]).join(" | ") : ""}`.toLowerCase());
+  const lab = (i) => KG.labels[KG.nodes[i][0]];
+  const childOf = KG.rels.indexOf("CHILD_OF");
+  const groupCount = new Array(XGROUPS.length).fill(0);
+  for (let i = 0; i < N; i++) groupCount[grp[i]]++;
+  return { N, E, grp, deg, off, nb, ne, hay, lab, childOf, groupCount };
+})();
+
+const xs = { seed: null, sub: null, sel: null, selType: null, selKey: null, mode: "type", expanded: new Set(), trail: [], on: XGROUPS.map(() => true), sim: null, transform: null, colors: null, shown: 50, built: false };
+const xcolor = (gi) => xs.colors[gi];
+function xReadColors() {
+  const cs = getComputedStyle(document.documentElement);
+  xs.colors = XGROUPS.map(([k]) => cs.getPropertyValue("--g-" + k).trim());
+  xs.edge = cs.getPropertyValue("--g-edge").trim(); xs.edgeHi = cs.getPropertyValue("--g-edge-hi").trim();
+  xs.fg = cs.getPropertyValue("--fg").trim(); xs.bg = cs.getPropertyValue("--bg").trim(); xs.muted = cs.getPropertyValue("--muted").trim();
+}
+const nodeId = (i) => `${X.lab(i)}:${KG.nodes[i][1]}`;
+const keyProp = (i) => KG.keys[KG.nodes[i][0]];
+const dot = (gi) => `<i class="gdot" style="background:var(--g-${XGROUPS[gi][0]})"></i>`;
+
+// ----- search -----
+function xSearch(q) {
+  q = q.trim().toLowerCase();
+  if (!q) return [];
+  const out = [];
+  for (const v of KG.viruses) if (v.label.toLowerCase().includes(q)) out.push({ v, s: -1, d: 0 });
+  const hits = [];
+  for (let i = 0; i < X.N; i++) {
+    const h = X.hay[i], p = h.indexOf(q);
+    if (p < 0) continue;
+    const n = KG.nodes[i], name = String(n[2]).toLowerCase();
+    let tier;
+    if (name === q || String(n[1]).toLowerCase() === q || ` | ${n[4].toLowerCase()} | `.includes(` | ${q} | `)) tier = 0;
+    else if (name.startsWith(q)) tier = 1;
+    else if (p === 0 || /[\s|(\-:,/]/.test(h[p - 1])) tier = 2;
+    else tier = 3;
+    const pri = XPRI[X.lab(i)] ?? 3;   // bulk records (proteins, sequences, ...) always after named ones
+    hits.push({ i, s: (pri >= 4 ? 40 : 0) + tier * 10 + pri, d: X.deg[i] });
+  }
+  hits.sort((a, b) => a.s - b.s || b.d - a.d);
+  return out.concat(hits.slice(0, 14 - out.length));
+}
+function xMeta(i) {
+  const n = KG.nodes[i], p = n[3] || {};
+  const bits = [lname(X.lab(i)), `${keyProp(i)} ${n[1]}`];
+  for (const k of ["date", "aa_length", "taxon_rank", "species", "organism", "pubmed_id", "document_id", "award_key", "symbol", "xref_ncbi_protein_id"]) {
+    if (p[k] !== undefined && bits.length < 4) bits.push(k === "aa_length" ? `${p[k]} aa` : String(p[k]));
+  }
+  return bits.join(" · ");
+}
+let xSugItems = [], xSugAt = -1;
+function xRenderSug() {
+  const ul = $("x-sug");
+  if (!xSugItems.length) { ul.hidden = true; $("x-q").setAttribute("aria-expanded", "false"); return; }
+  ul.innerHTML = xSugItems.map((h, k) => h.v
+    ? `<li role="option" id="xs-${k}" data-k="${k}" aria-selected="${k === xSugAt}">${dot(0)}<span class="nm"><b>${esc(h.v.label)}</b></span><span class="dg">virus group</span><span class="mt">Every taxon filed under it, with sub-taxa and strains</span></li>`
+    : `<li role="option" id="xs-${k}" data-k="${k}" aria-selected="${k === xSugAt}">${dot(X.grp[h.i])}<span class="nm">${esc(KG.nodes[h.i][2])}</span><span class="dg">${fmt(X.deg[h.i])} links</span><span class="mt">${esc(xMeta(h.i))}</span></li>`).join("");
+  ul.hidden = false; $("x-q").setAttribute("aria-expanded", "true");
+  $("x-q").setAttribute("aria-activedescendant", xSugAt >= 0 ? `xs-${xSugAt}` : "");
+}
+function xPick(h) {
+  xSugItems = []; xRenderSug();
+  if (h.v) xSeed({ nodes: h.v.taxa.map((t) => KG.taxonIdx[t]).filter((x) => x !== undefined), kind: "Virus group", name: h.v.label });
+  else xSeed({ nodes: [h.i], kind: lname(X.lab(h.i)), name: KG.nodes[h.i][2] });
+  $("x-q").value = "";
+}
+
+// ----- subgraph -----
+// fromTrail: "push" adds to the trail (Explore from here), a number jumps back to that step, otherwise a new trail.
+function xSeed(seed, fromTrail) {
+  if (fromTrail === "push") xs.trail.push(seed);
+  else if (typeof fromTrail === "number") xs.trail = xs.trail.slice(0, fromTrail + 1);
+  else xs.trail = [seed];
+  xs.seed = seed; xs.sel = seed.nodes[0] ?? null; xs.selType = null; xs.userSel = false; xs.shown = 50; xs.expanded = new Set(); xs.pos = null;
+  xBuild();
+}
+function xRenderCrumbs() {
+  const el = $("x-crumbs"), type = xs.mode === "type";
+  const trail = xs.trail.length > 1 ? `<span class="sub">Path:</span>` + xs.trail.map((t, k) => k === xs.trail.length - 1
+    ? `<b>${esc(t.name)}</b>` : `<button type="button" class="x-crumb" data-step="${k}">${esc(t.name)}</button><span class="sub">›</span>`).join("") : "";
+  const exp = type && xs.expanded.size ? `<span class="sub">Shown one by one:</span>` + [...xs.expanded].map((li) => `<button type="button" class="x-chipx" data-merge="${li}" aria-label="Merge ${esc(xPlural(li))} back into one circle">${esc(xCap(xPlural(li)))} ×</button>`).join("")
+    + (xs.expanded.size > 1 ? `<button type="button" class="x-crumb" data-merge="all">Merge all</button>` : "") : "";
+  el.innerHTML = trail + (trail && exp ? `<span class="x-sep"></span>` : "") + exp;
+  el.hidden = !trail && !exp;
+}
+function xToggleExpand(li) {
+  if (xs.expanded.has(li)) xs.expanded.delete(li); else xs.expanded.add(li);
+  if (xs.selType === li) { xs.selType = null; xs.sel = null; }
+  xLayout(); xRenderDetail();
+}
+function xBuild() {
+  const seed = xs.seed, hops = +$("x-hops").value, hubLim = +$("x-hub").value || Infinity, withSub = $("x-sub").checked;
+  const hop = new Map(), hubs = new Set();
+  let roots = [...seed.nodes];
+  if (withSub) {   // walk CHILD_OF down from any taxon in the seed
+    const stack = roots.filter((i) => X.lab(i) === "Taxon"), seen = new Set(roots);
+    while (stack.length) {
+      const t = stack.pop();
+      for (let k = X.off[t]; k < X.off[t + 1]; k++) {
+        const e = X.ne[k];
+        if (KG.edges[3 * e + 2] === X.childOf && KG.edges[3 * e + 1] === t) {
+          const c = KG.edges[3 * e];
+          if (!seen.has(c)) { seen.add(c); roots.push(c); stack.push(c); }
+        }
+      }
+    }
+  }
+  roots.forEach((r) => hop.set(r, 0));
+  let frontier = roots, truncated = false;
+  outer: for (let d = 1; d <= hops && frontier.length; d++) {
+    const next = [];
+    for (const u of frontier) {
+      if (d > 1 && X.deg[u] > hubLim) { hubs.add(u); continue; }
+      for (let k = X.off[u]; k < X.off[u + 1]; k++) {
+        const v = X.nb[k];
+        if (hop.has(v) || !xs.on[X.grp[v]]) continue;
+        hop.set(v, d); next.push(v);
+        if (hop.size >= XCAP) { truncated = true; break outer; }
+      }
+    }
+    frontier = next;
+  }
+  const nodes = [...hop.keys()], edges = [], sdeg = new Map();
+  for (const u of nodes) for (let k = X.off[u]; k < X.off[u + 1]; k++) {
+    const e = X.ne[k];
+    if (KG.edges[3 * e] !== u) continue;
+    const v = KG.edges[3 * e + 1];
+    if (!hop.has(v)) continue;
+    edges.push(e); sdeg.set(u, (sdeg.get(u) || 0) + 1); sdeg.set(v, (sdeg.get(v) || 0) + 1);
+  }
+  xs.sub = { nodes, edges, hop, hubs, sdeg, truncated, hops, hubLim, roots: new Set(roots) };
+  if (xs.sel !== null && !hop.has(xs.sel)) xs.sel = roots[0] ?? null;
+  xRenderSummary(); xRenderTable(); xRenderDetail(); xLayout();
+}
+
+function xRenderSummary() {
+  const { nodes, edges, hubs, hop, truncated, hops, hubLim, roots } = xs.sub, seed = xs.seed;
+  $("x-seedkind").textContent = seed.kind;
+  $("x-seedname").textContent = seed.name;
+  const extra = roots.size > seed.nodes.length ? ` Starts from ${fmt(roots.size)} taxa: the ${seed.nodes.length > 1 ? `${seed.nodes.length} roots` : "root"} and every sub-taxon and strain under it.` : "";
+  $("x-seednote").textContent = `Everything within ${hops} step${hops > 1 ? "s" : ""} of it in the knowledge graph${hubLim < Infinity ? `, stopping at hubs with more than ${fmt(hubLim)} links` : ""}.${extra}${truncated ? ` Stopped at ${fmt(XCAP)} nodes; use fewer steps or a lower hub limit to see the rest.` : ""}`;
+  const types = new Set(nodes.map((i) => KG.nodes[i][0]));
+  const docs = nodes.filter((i) => X.grp[i] >= 4 && X.grp[i] <= 6).length;
+  tiles($("x-tiles"), [
+    ["Nodes", fmt(nodes.length), `${types.size} record types`],
+    ["Links", fmt(edges.length), "between those nodes"],
+    ["Documents", fmt(docs), "grants, papers and patents"],
+    ["Hubs not expanded", fmt(hubs.size), hubs.size ? "kept, but not walked through" : "none reached"],
+  ]);
+  const byG = XGROUPS.map(() => 0); nodes.forEach((i) => byG[X.grp[i]]++);
+  $("x-seg").innerHTML = byG.map((c, gi) => c ? `<span style="flex:${c} 1 0;background:var(--g-${XGROUPS[gi][0]})" title="${esc(XGROUPS[gi][1])}: ${fmt(c)}"></span>` : "").join("");
+  $("x-legend").innerHTML = byG.map((c, gi) => c ? `<span><i style="background:var(--g-${XGROUPS[gi][0]})"></i>${esc(XGROUPS[gi][1])} <b style="color:var(--fg);font-weight:500">${fmt(c)}</b></span>` : "").join("");
+  $("x-exsize").textContent = `${fmt(nodes.length)} nodes · ${fmt(edges.length)} links`;
+  $("x-exstat").textContent = ""; $("x-exfallback").hidden = true;
+}
+
+// ----- node table -----
+function xRenderTable() {
+  const { nodes, hop, sdeg } = xs.sub;
+  const g = $("x-tgroup").value, q = $("x-tq").value.trim().toLowerCase();
+  const okType = g === "" ? () => true : g[0] === "l" ? (i) => KG.nodes[i][0] === +g.slice(1) : (i) => X.grp[i] === +g;
+  let rows = nodes.filter((i) => okType(i) && (!q || X.hay[i].includes(q)));
+  rows.sort((a, b) => hop.get(a) - hop.get(b) || (sdeg.get(b) || 0) - (sdeg.get(a) || 0));
+  const total = rows.length; rows = rows.slice(0, xs.shown);
+  $("x-table").innerHTML = total ? `<div class="table-wrap"><table class="data"><thead><tr><th>Type</th><th>Name</th><th>ID</th><th>Steps</th><th>Links here / total</th></tr></thead><tbody>${rows.map((i) => `
+    <tr class="x-row" data-i="${i}" aria-selected="${i === xs.sel}" tabindex="0"><td><span class="x-kind">${dot(X.grp[i])}${esc(lname(X.lab(i)))}</span></td>
+    <td>${esc(KG.nodes[i][2])}${xs.sub.hubs.has(i) ? ` <span class="chip">hub, not expanded</span>` : ""}</td>
+    <td class="num">${esc(keyProp(i))} ${esc(KG.nodes[i][1])}</td><td class="num">${hop.get(i)}</td>
+    <td class="num">${fmt(sdeg.get(i) || 0)} / ${fmt(X.deg[i])}</td></tr>`).join("")}</tbody></table></div>
+    ${total > rows.length ? `<div class="more"><button class="btn" type="button" id="x-more">Show more (${fmt(total - rows.length)} left)</button></div>` : ""}`
+    : `<div class="none">No nodes match.</div>`;
+}
+
+// ----- detail panel -----
+function xLink(i) {
+  const n = KG.nodes[i], p = n[3] || {}, l = X.lab(i);
+  if (p.url) return [p.url, "PubMed"];
+  if (l === "Patent" && p.document_id) return ["https://patents.google.com/patent/" + p.document_id.replace(/\s+/g, ""), "Google Patents"];
+  if (l === "GrantFunding" && p.project_detail_url) return [p.project_detail_url, "NIH RePORTER"];
+  if (l === "Grant" && p.award_key) return ["https://reporter.nih.gov/search/results?query=" + encodeURIComponent(p.award_key), "NIH RePORTER"];
+  if (l === "Structure") return ["https://www.rcsb.org/structure/" + n[2], "RCSB PDB"];
+  if (l === "Taxon") return ["https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=" + n[1], "NCBI Taxonomy"];
+  if (l === "Protein" && p.xref_ncbi_protein_id) return ["https://www.ncbi.nlm.nih.gov/protein/" + String(p.xref_ncbi_protein_id).split(";")[0], "NCBI Protein"];
+  if (l === "Sequence" && p.xref_genbank_accession) return ["https://www.ncbi.nlm.nih.gov/nuccore/" + String(p.xref_genbank_accession).split(";")[0], "GenBank"];
+  return null;
+}
+function xRenderDetail() {
+  const el = $("x-detail");
+  if (xs.selType !== null && xs.sub) return xRenderTypeDetail(el, xs.selType);
+  const i = xs.sel;
+  if (i === null || !xs.sub) { el.innerHTML = `<p class="note">Select a node in the drawing or the table to see its record.</p>`; return; }
+  const n = KG.nodes[i], p = n[3] || {}, { hop, sdeg } = xs.sub, lk = xLink(i);
+  const groups = new Map(); let outside = 0;
+  for (let k = X.off[i]; k < X.off[i + 1]; k++) {
+    const v = X.nb[k], e = X.ne[k];
+    if (!hop.has(v)) { outside++; continue; }
+    const out = KG.edges[3 * e] === i, key = `${out ? "→" : "←"} ${KG.rels[KG.edges[3 * e + 2]]} · ${lname(X.lab(v))}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(v);
+  }
+  const props = Object.entries(p).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${/^https?:\/\//.test(String(v)) ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}</dd>`).join("");
+  const li = KG.nodes[i][0], typeKey = xs.keyOf && xs.keyOf.get(i);
+  el.innerHTML = `
+    <span class="x-kind">${dot(X.grp[i])}${esc(lname(X.lab(i)))}</span>
+    <p class="x-name">${esc(n[2])}</p>
+    <dl class="x-props"><dt>${esc(keyProp(i))}</dt><dd>${esc(n[1])}</dd>${props}${n[4] ? `<dt>also</dt><dd>${esc(n[4])}</dd>` : ""}</dl>
+    <p class="note">${fmt(X.deg[i])} links in the graph · ${fmt(sdeg.get(i) || 0)} in this subgraph · ${hop.get(i)} step${hop.get(i) === 1 ? "" : "s"} from the start${xs.sub.hubs.has(i) ? " · hub, not expanded" : ""}</p>
+    <div class="x-acts">${xs.sub.roots.has(i) && xs.seed.nodes.length === 1 ? "" : `<button class="btn primary" type="button" id="x-from">Explore from here</button>`}
+      ${lk ? `<a class="btn" href="${esc(lk[0])}" target="_blank" rel="noopener">Open in ${esc(lk[1])} ↗</a>` : ""}
+      ${xs.mode === "type" && typeKey === "t" + li ? `<button class="btn" type="button" data-type="${li}">All ${esc(xPlural(li))}</button>` : ""}
+      ${xs.mode === "type" && xs.expanded.has(li) ? `<button class="btn" type="button" data-expand="${li}">Merge ${esc(xPlural(li))} back</button>` : ""}</div>
+    ${[...groups].sort((a, b) => b[1].length - a[1].length).map(([key, vs]) => `
+      <div class="x-rel">${esc(key)} (${fmt(vs.length)})</div>
+      <div class="x-nb">${vs.slice(0, 8).map((v) => `<button type="button" data-i="${v}">${dot(X.grp[v])}<span>${esc(KG.nodes[v][2])}</span></button>`).join("")}
+      ${vs.length > 8 ? `<span class="sub">and ${fmt(vs.length - 8)} more in the table</span>` : ""}</div>`).join("")}
+    ${outside ? `<p class="note">${fmt(outside)} more link${outside === 1 ? "" : "s"} lead outside this subgraph.</p>` : ""}`;
+}
+const XPLURAL = { Taxon: "virus taxa", Publication: "papers", GrantFunding: "grant funding years", Study: "studies", Biosample: "biosamples", Alignment: "alignments" };
+function xPlural(li) { const l = KG.labels[li]; if (XPLURAL[l]) return XPLURAL[l]; const n = lname(l).toLowerCase(); return /[^aeiou]y$/.test(n) ? n.slice(0, -1) + "ies" : n + "s"; }
+const xCap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+// A merged circle: every record of one type in the subgraph.
+function xRenderTypeDetail(el, li) {
+  const d = xs.pos && xs.pos.get("t" + li);
+  const members = d ? d.members : xs.sub.nodes.filter((i) => KG.nodes[i][0] === li && !(xs.keyOf.get(i) || "").startsWith("n"));
+  const { sdeg } = xs.sub;
+  const sorted = [...members].sort((a, b) => (sdeg.get(b) || 0) - (sdeg.get(a) || 0));
+  const conns = (xs.links || []).filter((l) => l.source.key === "t" + li || l.target.key === "t" + li)
+    .map((l) => ({ o: l.source.key === "t" + li ? l.target : l.source, l })).sort((a, b) => b.l.count - a.l.count);
+  const relTxt = (m) => [...m].sort((a, b) => b[1] - a[1]).map(([r, c]) => `${r} ${fmt(c)}`).join(", ");
+  el.innerHTML = `
+    <span class="x-kind">${dot(X.grp[members[0]] ?? 0)}Record type</span>
+    <p class="x-name">${esc(xCap(xPlural(li)))}</p>
+    <p class="note">${fmt(members.length)} ${esc(xPlural(li))} ${xs.expanded.has(li) ? `that don't fit when shown one by one (the ${fmt(XEXP)} most connected are drawn separately)` : "in this subgraph, merged into one circle"}.${d && d.inner ? ` ${fmt(d.inner)} links run between them (${esc(relTxt(d.innerRels))}).` : ""}</p>
+    <div class="x-acts"><button class="btn primary" type="button" data-expand="${li}">${xs.expanded.has(li) ? `Merge back into one circle` : `Show the ${fmt(members.length)} one by one`}</button><button class="btn" type="button" id="x-totable" data-li="${li}">List them in the table</button></div>
+    ${conns.length ? `<div class="x-rel">Connected to</div><div class="x-nb">${conns.map(({ o, l }) => `<button type="button" data-key="${esc(o.key)}">${dot(o.gi)}<span>${esc(o.name)} · ${fmt(l.count)} link${l.count === 1 ? "" : "s"} <span class="sub">(${esc(relTxt(l.rels))})</span></span></button>`).join("")}</div>` : ""}
+    <div class="x-rel">Most connected ${esc(xPlural(li))}</div>
+    <div class="x-nb">${sorted.slice(0, 25).map((v) => `<button type="button" data-i="${v}">${dot(X.grp[v])}<span>${esc(KG.nodes[v][2])}</span></button>`).join("")}
+    ${sorted.length > 25 ? `<span class="sub">and ${fmt(sorted.length - 25)} more in the table</span>` : ""}</div>`;
+}
+function xSelect(i, center) {
+  xs.sel = i; xs.selType = null; xs.selKey = xs.keyOf ? xs.keyOf.get(i) ?? null : null; xs.userSel = true;
+  xRenderDetail(); xDraw();
+  for (const tr of document.querySelectorAll("#x-table tr.x-row")) tr.setAttribute("aria-selected", +tr.dataset.i === i);
+  if (center) xCenter(xs.selKey);
+}
+function xSelectType(li, center) {
+  xs.selType = li; xs.sel = null; xs.selKey = "t" + li; xs.userSel = true;
+  xRenderDetail(); xDraw();
+  for (const tr of document.querySelectorAll("#x-table tr.x-row")) tr.setAttribute("aria-selected", "false");
+  if (center) xCenter(xs.selKey);
+}
+function xCenter(key) {
+  if (!key || !xs.pos || !xs.pos.has(key)) return;
+  const d = xs.pos.get(key), c = $("x-canvas"), k = xs.mode === "type" ? xs.transform.k : Math.max(xs.transform.k, 1.4);
+  xs.zoomSel.transition().duration(450).call(xs.zoom.transform, d3.zoomIdentity.translate(c.clientWidth / 2 - d.x * k, c.clientHeight / 2 - d.y * k).scale(k));
+}
+
+// ----- drawing (d3-force on canvas) -----
+// Two modes. "type" (default): the starting record(s) stay as one node, every other record type
+// becomes one circle sized by its count, and links between two types merge into one line whose
+// width shows how many links it stands for. "record": one dot per record, up to XDRAW of them.
+function xBuildDrawn() {
+  const { nodes, edges, hop, sdeg, roots, hubs } = xs.sub, keyOf = new Map(), drawn = new Map();
+  const seedKey = roots.size > 1 ? "seed" : null;
+  const add = (key, i, extra) => {
+    let d = drawn.get(key);
+    if (!d) { d = { key, members: [], gi: X.grp[i], li: KG.nodes[i][0], root: false, hub: false, inner: 0, innerRels: new Map(), ...extra }; drawn.set(key, d); }
+    d.members.push(i); keyOf.set(i, key);
+  };
+  if (xs.mode === "type") {
+    for (const i of nodes) {
+      if (roots.has(i)) add(seedKey || "n" + i, i, { root: true, i: seedKey ? undefined : i, name: seedKey ? xs.seed.name : KG.nodes[i][2] });
+      else if (!xs.expanded.has(KG.nodes[i][0])) add("t" + KG.nodes[i][0], i, { name: xCap(xPlural(KG.nodes[i][0])) });
+    }
+    // Types broken apart: their XEXP most connected records one by one, the rest stay merged.
+    for (const li of xs.expanded) {
+      const ms = nodes.filter((i) => KG.nodes[i][0] === li && !roots.has(i)).sort((a, b) => (sdeg.get(b) || 0) - (sdeg.get(a) || 0));
+      ms.forEach((i, k) => k < XEXP ? add("n" + i, i, { i, name: KG.nodes[i][2], hub: hubs.has(i), exp: true }) : add("t" + li, i, { name: "Other " + xPlural(li) }));
+    }
+    for (const d of drawn.values()) {
+      if (d.key.startsWith("t") && d.members.length === 1 && !xs.expanded.has(d.li)) {   // a type with one record shows that record
+        const i = d.members[0]; drawn.delete(d.key);
+        add("n" + i, i, { i, name: KG.nodes[i][2], hub: hubs.has(i) });
+      }
+    }
+    for (const d of drawn.values()) d.r = d.members.length > 1 ? Math.min(52, 9 + 3.4 * Math.sqrt(d.members.length)) : d.root ? 14 : d.exp ? Math.min(10, 4 + Math.sqrt(sdeg.get(d.members[0]) || 0) * 0.7) : 10;
+  } else {
+    let pick = nodes;
+    if (nodes.length > XDRAW) pick = [...nodes].sort((a, b) => hop.get(a) - hop.get(b) || (sdeg.get(b) || 0) - (sdeg.get(a) || 0)).slice(0, XDRAW);
+    for (const i of pick) add("n" + i, i, { i, name: KG.nodes[i][2], root: roots.has(i), hub: hubs.has(i), r: roots.has(i) ? 9 : Math.min(9, 3 + Math.sqrt(sdeg.get(i) || 0) * 0.8) });
+  }
+  const links = new Map();
+  for (const e of edges) {
+    const ka = keyOf.get(KG.edges[3 * e]), kb = keyOf.get(KG.edges[3 * e + 1]);
+    if (!ka || !kb) continue;
+    const rel = KG.rels[KG.edges[3 * e + 2]];
+    if (ka === kb) { const d = drawn.get(ka); d.inner++; d.innerRels.set(rel, (d.innerRels.get(rel) || 0) + 1); continue; }
+    const id = ka < kb ? ka + "|" + kb : kb + "|" + ka;
+    let l = links.get(id);
+    if (!l) { l = { a: ka, b: kb, count: 0, rels: new Map() }; links.set(id, l); }
+    l.count++; l.rels.set(rel, (l.rels.get(rel) || 0) + 1);
+  }
+  return { drawn, links: [...links.values()], keyOf };
+}
+function xLayout() {
+  if (typeof d3 === "undefined") { $("x-drawnote").textContent = "The drawing library didn't load. The table and exports below still work."; return; }
+  const { drawn, links, keyOf } = xBuildDrawn(), type = xs.mode === "type";
+  const old = xs.pos || new Map(), pos = new Map();
+  const sn = [...drawn.values()];
+  for (const d of sn) { const o = old.get(d.key); d.x = o ? o.x : (Math.random() - .5) * 300; d.y = o ? o.y : (Math.random() - .5) * 300; pos.set(d.key, d); }
+  const sl = links.map((l) => ({ source: pos.get(l.a), target: pos.get(l.b), count: l.count, rels: l.rels }));
+  xs.pos = pos; xs.links = sl; xs.drawn = sn; xs.keyOf = keyOf;
+  xs.selKey = xs.selType !== null ? (pos.has("t" + xs.selType) ? "t" + xs.selType : null) : (xs.sel !== null ? keyOf.get(xs.sel) ?? null : null);
+  if (xs.selType !== null && !xs.selKey) { xs.selType = null; xs.sel = xs.seed.nodes[0] ?? null; xs.selKey = keyOf.get(xs.sel) ?? null; xRenderDetail(); }
+  const n = xs.sub.nodes.length;
+  $("x-drawnote").textContent = type
+    ? `Each circle holds every record of one type; its size is how many, and a line's thickness is how many links it stands for. Select a circle to list its records, double-click it to show them one by one, and select any node to fade everything not linked to it. Drag to pan, scroll to zoom.`
+    : n > XDRAW ? `Drawing the ${fmt(XDRAW)} nodes closest to the start (of ${fmt(n)}). The table and every export include all of them.`
+    : "Drag to pan, scroll or pinch to zoom, drag a node to move it. Select a node to see its record.";
+  if (xs.sim) xs.sim.stop();
+  const many = sn.length > 600;
+  xs.sim = d3.forceSimulation(sn).stop();
+  if (type) {
+    const small = (d) => d.exp;
+    xs.sim.force("link", d3.forceLink(sl).distance((l) => small(l.source) || small(l.target) ? l.source.r + l.target.r + 40 : l.source.r + l.target.r + 120).strength((l) => small(l.source) || small(l.target) ? 0.4 : 0.15))
+      .force("charge", d3.forceManyBody().strength((d) => small(d) ? -60 : -1400))
+      .force("collide", d3.forceCollide((d) => small(d) ? d.r + 3 : d.r + 48))
+      .force("x", d3.forceX(0).strength(0.06)).force("y", d3.forceY(0).strength(0.06)).alphaDecay(0.03);
+  } else {
+    xs.sim.force("link", d3.forceLink(sl).distance((l) => (X.deg[l.source.i] > 60 || X.deg[l.target.i] > 60 ? 50 : 26)).strength(0.5))
+      .force("charge", d3.forceManyBody().strength(many ? -22 : -60).distanceMax(320).theta(0.95))
+      .force("x", d3.forceX(0).strength(0.04)).force("y", d3.forceY(0).strength(0.04)).alphaDecay(many ? 0.035 : 0.025);
+  }
+  const fresh = !sn.some((d) => old.has(d.key));
+  if (!fresh) for (const d of sn) if (!old.has(d.key)) {   // new nodes start next to the circle they came out of
+    const from = old.get("t" + d.li); if (from) { d.x = from.x + (Math.random() - .5) * from.r * 2; d.y = from.y + (Math.random() - .5) * from.r * 2; }
+  }
+  if (fresh) xs.sim.tick(type ? 200 : many ? 60 : 120);
+  xRenderCrumbs();
+  xs.fitted = !fresh;
+  if (fresh) xFit(false);
+  else xs.sim.alpha(0.6);
+  xs.sim.on("tick", () => { if (!xs.fitted && xs.sim.alpha() < 0.12) { xs.fitted = true; xFit(true); } xDraw(); }).restart();
+  xDraw();
+}
+function xFit(animate) {
+  if (!xs.drawn || !xs.drawn.length) return;
+  const c = $("x-canvas"), w = c.clientWidth, h = c.clientHeight;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const d of xs.drawn) { x0 = Math.min(x0, d.x - d.r); y0 = Math.min(y0, d.y - d.r); x1 = Math.max(x1, d.x + d.r); y1 = Math.max(y1, d.y + d.r); }
+  const k = Math.min(xs.mode === "type" ? 1.6 : 3, 0.92 / Math.max((x1 - x0) / (w - 220), (y1 - y0) / (h - 60), 1e-6));
+  const t = d3.zoomIdentity.translate(w / 2 - k * (x0 + x1) / 2, h / 2 - k * (y0 + y1) / 2).scale(k);
+  (animate ? xs.zoomSel.transition().duration(500) : xs.zoomSel).call(xs.zoom.transform, t);
+}
+function xSize() {
+  const c = $("x-canvas"), dpr = window.devicePixelRatio || 1;
+  c.width = Math.max(1, c.clientWidth * dpr); c.height = Math.max(1, c.clientHeight * dpr);
+}
+function xDraw() {
+  const c = $("x-canvas");
+  if (!xs.drawn || !c.clientWidth) return;
+  if (c.width !== Math.round(c.clientWidth * (window.devicePixelRatio || 1))) xSize();
+  const ctx = c.getContext("2d"), dpr = window.devicePixelRatio || 1, t = xs.transform || d3.zoomIdentity, type = xs.mode === "type";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, c.clientWidth, c.clientHeight);
+  ctx.translate(t.x, t.y); ctx.scale(t.k, t.k);
+  const sel = xs.selKey, near = new Set();
+  const lw = (l) => type ? Math.min(14, 1.2 + 1.5 * Math.log2(l.count)) : 0.8 / t.k;
+  ctx.strokeStyle = xs.edge; ctx.lineCap = "round";
+  if (type) {
+    for (const l of xs.links) {
+      if (l.source.key === sel || l.target.key === sel) { near.add(l.source.key); near.add(l.target.key); continue; }
+      ctx.beginPath(); ctx.lineWidth = lw(l); ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); ctx.stroke();
+    }
+  } else {
+    ctx.beginPath(); ctx.lineWidth = 0.8 / t.k;
+    for (const l of xs.links) {
+      if (l.source.key === sel || l.target.key === sel) { near.add(l.source.key); near.add(l.target.key); continue; }
+      ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y);
+    }
+    ctx.stroke();
+  }
+  if (sel !== null) {
+    ctx.strokeStyle = xs.userSel ? xs.edgeHi : xs.edge;
+    for (const l of xs.links) if (l.source.key === sel || l.target.key === sel) {
+      ctx.beginPath(); ctx.lineWidth = type ? lw(l) : 1.6 / t.k; ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); ctx.stroke();
+    }
+  }
+  const byG = XGROUPS.map(() => []);
+  for (const d of xs.drawn) byG[d.gi].push(d);
+  ctx.lineWidth = (type ? 2 : 1.5) / t.k; ctx.strokeStyle = xs.bg;
+  // With a selection, everything not linked to it fades, so its neighborhood stands out.
+  const focus = xs.userSel && sel !== null, lit = (d) => !focus || d.key === sel || near.has(d.key);
+  for (const pass of [false, true]) {
+    ctx.globalAlpha = pass ? 1 : 0.22;
+    byG.forEach((arr, gi) => {
+      const ds = arr.filter((d) => lit(d) === pass);
+      if (!ds.length) return;
+      ctx.beginPath(); ctx.fillStyle = xcolor(gi);
+      for (const d of ds) { ctx.moveTo(d.x + d.r, d.y); ctx.arc(d.x, d.y, d.r, 0, 2 * Math.PI); }
+      ctx.fill(); ctx.stroke();
+    });
+  }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = xs.fg;
+  for (const d of xs.drawn) {
+    if (!d.root && !d.hub && d.key !== sel) continue;
+    ctx.beginPath(); ctx.lineWidth = (d.key === sel ? 2.5 : 1.5) / t.k;
+    ctx.setLineDash(d.hub && !d.root ? [3 / t.k, 2 / t.k] : []);
+    ctx.arc(d.x, d.y, d.r + 2.5 / t.k, 0, 2 * Math.PI); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.lineJoin = "round"; ctx.textBaseline = "middle";
+  const short = (s, n) => (s = String(s), s.length > n ? s.slice(0, n - 2) + "…" : s);
+  if (type) {
+    // every circle is labelled: the count inside, the name below
+    const fs = 12 / t.k, w = c.clientWidth, h = c.clientHeight;
+    let budget = 60;
+    for (const d of xs.drawn) {
+      if (d.exp && d.key !== sel && !near.has(d.key)) {   // one-by-one records: label only when zoomed in
+        const sx = d.x * t.k + t.x, sy = d.y * t.k + t.y;
+        if (t.k < 1.5 || budget <= 0 || sx < 0 || sy < 0 || sx > w || sy > h) continue;
+        budget--;
+      }
+      if (d.exp && focus && d.key !== sel && !near.has(d.key)) continue;
+      ctx.globalAlpha = lit(d) ? 1 : 0.35;
+      ctx.textAlign = "center";
+      if (d.members.length > 1) {
+        ctx.font = `600 ${Math.max(fs, Math.min(d.r * 0.62, 22))}px "IBM Plex Sans", system-ui, sans-serif`;
+        ctx.fillStyle = "#fff"; ctx.fillText(fmt(d.members.length), d.x, d.y + 0.5);
+      }
+      ctx.font = `${d.root ? 600 : 500} ${fs}px "IBM Plex Sans", system-ui, sans-serif`;
+      ctx.lineWidth = 3.5 / t.k; ctx.strokeStyle = xs.bg; ctx.fillStyle = xs.fg;
+      const txt = short(d.name, d.exp ? 30 : 34), y = d.y + d.r + 9 / t.k;
+      ctx.strokeText(txt, d.x, y); ctx.fillText(txt, d.x, y);
+    }
+    ctx.globalAlpha = 1;
+    // link counts on the selected circle's lines (or on every line when there are few)
+    ctx.font = `500 ${11 / t.k}px "IBM Plex Mono", ui-monospace, monospace`;
+    const showAll = xs.links.filter((l) => !l.source.exp && !l.target.exp).length <= 16;
+    for (const l of xs.links) {
+      if (!showAll && l.source.key !== sel && l.target.key !== sel) continue;
+      if ((l.source.exp || l.target.exp) && l.source.key !== sel && l.target.key !== sel) continue;
+      const mx = (l.source.x + l.target.x) / 2, my = (l.source.y + l.target.y) / 2;
+      ctx.lineWidth = 3.5 / t.k; ctx.strokeStyle = xs.bg; ctx.fillStyle = xs.muted;
+      ctx.strokeText(fmt(l.count), mx, my); ctx.fillText(fmt(l.count), mx, my);
+    }
+    ctx.textAlign = "start";
+    return;
+  }
+  // record mode labels: start, selection and its neighbors; bigger nodes once zoomed in
+  ctx.font = `${11 / t.k}px "IBM Plex Sans", system-ui, sans-serif`;
+  ctx.lineWidth = 3 / t.k; ctx.strokeStyle = xs.bg; ctx.fillStyle = xs.fg;
+  let budget = 70;
+  const lab = (d) => { const txt = short(d.name, 38); ctx.strokeText(txt, d.x + d.r + 3 / t.k, d.y); ctx.fillText(txt, d.x + d.r + 3 / t.k, d.y); };
+  for (const d of xs.drawn) if (d.root && budget-- > 0) lab(d);
+  if (sel !== null && xs.pos.has(sel)) { lab(xs.pos.get(sel)); if (near.size <= 16 || t.k > 1.6) for (const k of near) if (k !== sel && budget-- > 0) lab(xs.pos.get(k)); }
+  if (t.k > 1.3) {
+    const w = c.clientWidth, h = c.clientHeight;
+    for (const d of xs.drawn) {
+      if (budget <= 0) break;
+      if (d.r < 4.5 || d.root || near.has(d.key)) continue;
+      const sx = d.x * t.k + t.x, sy = d.y * t.k + t.y;
+      if (sx < 0 || sy < 0 || sx > w || sy > h) continue;
+      lab(d); budget--;
+    }
+  }
+}
+function xFind(ev) {
+  const c = $("x-canvas"), [px, py] = d3.pointer(ev, c), t = xs.transform || d3.zoomIdentity;
+  const [x, y] = t.invert([px, py]);
+  let best = null, bd = Infinity;
+  for (const d of xs.drawn || []) {
+    const dd = (d.x - x) ** 2 + (d.y - y) ** 2, lim = (d.r + 5 / t.k) ** 2;
+    if (dd < lim && dd < bd) { bd = dd; best = d; }
+  }
+  return best;
+}
+const xClickNode = (d) => (xs.userSel = true) && d.i !== undefined ? xSelect(d.i, false) : d.key === "seed" ? xSelect(d.members[0], false) : xSelectType(d.li, false);
+function xInitCanvas() {
+  if (typeof d3 === "undefined") return;
+  const c = $("x-canvas"), sel = d3.select(c);
+  xs.transform = d3.zoomIdentity;
+  xs.zoom = d3.zoom().scaleExtent([0.05, 8]).on("zoom", (ev) => { xs.transform = ev.transform; if (ev.sourceEvent && ev.sourceEvent.type === "mousemove") xs.panned = true; xDraw(); });
+  sel.call(d3.drag().container(c).subject((ev) => xFind(ev.sourceEvent))
+    .on("start", (ev) => { if (!ev.active) xs.sim.alphaTarget(0.25).restart(); ev.subject.fx = ev.subject.x; ev.subject.fy = ev.subject.y; xs.dragMoved = false; })
+    .on("drag", (ev) => { const [x, y] = xs.transform.invert(d3.pointer(ev.sourceEvent, c)); ev.subject.fx = x; ev.subject.fy = y; xs.dragMoved = true; })
+    .on("end", (ev) => { if (!ev.active) xs.sim.alphaTarget(0); ev.subject.fx = null; ev.subject.fy = null; if (!xs.dragMoved) xClickNode(ev.subject); }));
+  sel.call(xs.zoom).on("dblclick.zoom", null);
+  c.addEventListener("dblclick", (ev) => {
+    if (xs.mode !== "type") return;
+    const d = xFind(ev); if (!d) return;
+    if (d.key.startsWith("t") && !xs.expanded.has(d.li)) xToggleExpand(d.li);
+    else if (d.exp || (d.key.startsWith("t") && xs.expanded.has(d.li))) xToggleExpand(d.li);
+  });
+  c.addEventListener("click", (ev) => { if (!xFind(ev) && (xs.sel !== null || xs.selType !== null) && !xs.panned) { xs.sel = null; xs.selType = null; xs.selKey = null; xRenderDetail(); xDraw(); } xs.panned = false; });
+  xs.zoomSel = sel;
+  c.addEventListener("pointermove", (ev) => {
+    const d = xFind(ev);
+    if (!d) { tip.hidden = true; c.style.cursor = ""; return; }
+    c.style.cursor = "pointer";
+    tip.replaceChildren();
+    const b = document.createElement("b"), s = document.createElement("span");
+    if (d.members.length > 1) { b.textContent = `${d.name}: ${fmt(d.members.length)}`; s.textContent = d.root ? "The starting records" : xs.expanded.has(d.li) ? "Select to list them; double-click to merge back" : "Select to list them; double-click to show them one by one"; }
+    else { b.textContent = d.name; s.textContent = `${lname(X.lab(d.members[0]))} · ${fmt(xs.sub.sdeg.get(d.members[0]) || 0)} links here`; }
+    tip.append(b, s); tip.hidden = false;
+    const r = tip.getBoundingClientRect();
+    tip.style.left = Math.min(window.innerWidth - r.width - 8, ev.clientX + 12) + "px";
+    tip.style.top = Math.max(8, ev.clientY - r.height - 10) + "px";
+  });
+  c.addEventListener("pointerleave", () => { tip.hidden = true; });
+  const mq = window.matchMedia("(prefers-color-scheme: dark)");
+  const re = () => { xReadColors(); xDraw(); };
+  mq.addEventListener?.("change", re);
+  new MutationObserver(re).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}
+
+// ----- export -----
+const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "subgraph";
+const csvCell = (v) => { const s = v === undefined || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+const xml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]);
+function xEdgeRow(e) {
+  const a = KG.edges[3 * e], b = KG.edges[3 * e + 1], ep = KG.eprops[e];
+  return { a, b, type: KG.rels[KG.edges[3 * e + 2]], confidence: ep ? ep[0] : null, matched_terms: ep ? ep[1] : "", support_count: ep ? ep[2] : null };
+}
+function xExportJSON() {
+  const { nodes, edges, hop, hops, hubLim } = xs.sub;
+  return JSON.stringify({
+    seed: { kind: xs.seed.kind, name: xs.seed.name, ids: xs.seed.nodes.map(nodeId) },
+    settings: { steps: hops, hub_limit: hubLim === Infinity ? null : hubLim, include_subtaxa: $("x-sub").checked, types: XGROUPS.filter((g, gi) => xs.on[gi]).map((g) => g[1]) },
+    graph_built: KG.built,
+    nodes: nodes.map((i) => ({ id: nodeId(i), label: X.lab(i), key_property: keyProp(i), key: KG.nodes[i][1], name: KG.nodes[i][2], steps: hop.get(i), properties: KG.nodes[i][3] || {} })),
+    links: edges.map((e) => { const r = xEdgeRow(e); const o = { source: nodeId(r.a), target: nodeId(r.b), type: r.type }; if (r.confidence !== null || r.matched_terms) Object.assign(o, { confidence: r.confidence, matched_terms: r.matched_terms, support_count: r.support_count }); return o; }),
+  }, null, 1);
+}
+function xExportNodes() {
+  const { nodes, hop } = xs.sub;
+  const head = ["id", "label", "key_property", "key", "name", "steps", "links_in_subgraph", "links_total", "properties"];
+  return [head.join(","), ...nodes.map((i) => [nodeId(i), X.lab(i), keyProp(i), KG.nodes[i][1], KG.nodes[i][2], hop.get(i), xs.sub.sdeg.get(i) || 0, X.deg[i], KG.nodes[i][3] || {}].map(csvCell).join(","))].join("\n") + "\n";
+}
+function xExportEdges() {
+  const head = ["source", "type", "target", "source_label", "source_name", "target_label", "target_name", "confidence", "matched_terms", "support_count"];
+  return [head.join(","), ...xs.sub.edges.map((e) => { const r = xEdgeRow(e); return [nodeId(r.a), r.type, nodeId(r.b), X.lab(r.a), KG.nodes[r.a][2], X.lab(r.b), KG.nodes[r.b][2], r.confidence, r.matched_terms, r.support_count].map(csvCell).join(","); })].join("\n") + "\n";
+}
+function xExportGraphML() {
+  const { nodes, edges, hop } = xs.sub;
+  const out = [`<?xml version="1.0" encoding="UTF-8"?>`, `<graphml xmlns="http://graphml.graphdrawing.org/xmlns">`,
+    `<key id="label" for="node" attr.name="label" attr.type="string"/>`, `<key id="name" for="node" attr.name="name" attr.type="string"/>`,
+    `<key id="key" for="node" attr.name="key" attr.type="string"/>`, `<key id="steps" for="node" attr.name="steps" attr.type="int"/>`,
+    `<key id="props" for="node" attr.name="properties" attr.type="string"/>`, `<key id="type" for="edge" attr.name="type" attr.type="string"/>`,
+    `<key id="conf" for="edge" attr.name="confidence" attr.type="double"/>`,
+    `<graph id="subgraph" edgedefault="directed">`];
+  for (const i of nodes) out.push(`<node id="${xml(nodeId(i))}"><data key="label">${xml(X.lab(i))}</data><data key="name">${xml(KG.nodes[i][2])}</data><data key="key">${xml(KG.nodes[i][1])}</data><data key="steps">${hop.get(i)}</data><data key="props">${xml(JSON.stringify(KG.nodes[i][3] || {}))}</data></node>`);
+  edges.forEach((e, k) => { const r = xEdgeRow(e); out.push(`<edge id="e${k}" source="${xml(nodeId(r.a))}" target="${xml(nodeId(r.b))}"><data key="type">${xml(r.type)}</data>${r.confidence !== null ? `<data key="conf">${r.confidence}</data>` : ""}</edge>`); });
+  out.push(`</graph>`, `</graphml>`);
+  return out.join("\n") + "\n";
+}
+function xExportCypher() {
+  const { nodes, edges, hops } = xs.sub, byL = new Map();
+  for (const i of nodes) { const l = X.lab(i); if (!byL.has(l)) byL.set(l, []); byL.get(l).push(KG.nodes[i][1]); }
+  // This page folds Protein-[:ENCODED_BY]->Feature-[:ON_SEQUENCE]->Sequence into one link; add those features back.
+  const enc = KG.rels.indexOf("ENCODED_ON"), feats = [];
+  for (const e of edges) if (KG.edges[3 * e + 2] === enc) { const f = (KG.nodes[KG.edges[3 * e]][3] || {}).feature_id; if (f !== undefined) feats.push(f); }
+  if (feats.length) byL.set("Feature", [...new Set([...(byL.get("Feature") || []), ...feats])]);
+  const conds = [...byL].map(([l, ks]) => `(n:${l} AND n.${KG.keys[KG.labels.indexOf(l)]} IN ${JSON.stringify(ks)})`);
+  return `// Subgraph around ${xs.seed.kind} "${String(xs.seed.name).replace(/\n/g, " ")}": ${hops} step${hops > 1 ? "s" : ""}, ${nodes.length} nodes, ${edges.length} links
+// (graph data from ${KG.built}). Paste into Neo4j Browser (http://localhost:7474) to get the same subgraph.
+MATCH (n)
+WHERE ${conds.join("\n   OR ")}
+WITH collect(n) AS ns
+UNWIND ns AS a
+OPTIONAL MATCH (a)-[r]->(b)
+WHERE b IN ns
+RETURN a, r, b;
+`;
+}
+const XEX = {
+  json: ["json", "application/json", xExportJSON], nodes: ["nodes.csv", "text/csv", xExportNodes], edges: ["links.csv", "text/csv", xExportEdges],
+  graphml: ["graphml", "application/xml", xExportGraphML], cypher: ["cypher.txt", "text/plain", xExportCypher],
+};
+let XDL = null, XDLready = false;
+(async () => { try { XDL = window.claude?.use ? await window.claude.use("downloads") : null; } catch { XDL = null; } XDLready = true; })();
+async function xSave(filename, data, textForFallback) {
+  const st = $("x-exstat");
+  if (XDL) {
+    try { await XDL.save({ filename, data }); st.textContent = `Saved ${filename}.`; }
+    catch (e) { st.textContent = e?.code === "declined" ? "Save cancelled." : e?.code === "rate_limited" ? "A save is already waiting for you to confirm." : `Couldn't save the file (${e?.code || "error"}).`; if (e?.code !== "declined" && e?.code !== "rate_limited") xFallback(textForFallback); }
+    return;
+  }
+  if (!window.claude) {   // opened as a local file: an ordinary browser download works
+    const a = document.createElement("a"); a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data])); a.download = filename;
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    st.textContent = `Downloaded ${filename}.`; return;
+  }
+  st.textContent = XDLready ? "File saving isn't available in this view. Copy the text below instead." : "Still connecting to file saving; try again in a moment.";
+  if (XDLready) xFallback(textForFallback);
+}
+function xFallback(text) {
+  if (!text) return;
+  $("x-exfallback").hidden = false; $("x-extext").value = text.length > 2e6 ? text.slice(0, 2e6) + "\n… (cut at 2 MB)" : text;
+}
+async function xExport(kind) {
+  const base = `subgraph-${slug(xs.seed.name)}-${xs.sub.hops}step`;
+  if (kind === "zip") {
+    if (typeof JSZip === "undefined") { $("x-exstat").textContent = "The zip library didn't load; use the single formats instead."; return; }
+    $("x-exstat").textContent = "Packing…";
+    const z = new JSZip();
+    for (const [, [ext, , fn]] of Object.entries(XEX)) z.file(`${base}.${ext}`, fn());
+    z.file("README.txt", `Subgraph exported from the Filovirus Research Dashboard (graph data ${KG.built}).\nStart: ${xs.seed.kind} ${xs.seed.name}\nSteps: ${xs.sub.hops}\nNodes: ${xs.sub.nodes.length}, links: ${xs.sub.edges.length}\n\nFiles: .json (nodes + links), nodes.csv, links.csv, .graphml (Gephi, Cytoscape, yEd), cypher.txt (run in Neo4j Browser).\nNode ids are Label:key, the same label and primary key as in Neo4j and Postgres.\n`);
+    const blob = await z.generateAsync({ type: "blob", compression: "DEFLATE" });
+    return xSave(`${base}.zip`, blob, null);
+  }
+  const [ext, , fn] = XEX[kind], text = fn();
+  return xSave(`${base}.${ext === "graphml" && XDL ? "graphml.txt" : ext}`, text, text);
+}
+
+// ----- wiring -----
+function xInit() {
+  if (!KG) { $("x-nograph").hidden = false; for (const el of $("v-explore").children) if (el.id !== "x-nograph") el.hidden = true; return; }
+  xReadColors();
+  KG.taxonIdx = {};
+  const tl = KG.labels.indexOf("Taxon");
+  KG.nodes.forEach((n, i) => { if (n[0] === tl) KG.taxonIdx[n[1]] = i; });
+  $("x-groups").innerHTML = XGROUPS.map(([k, name], gi) => `<button type="button" data-g="${gi}" aria-pressed="${xs.on[gi]}">${dot(gi)}${esc(name)} <span class="n">${fmt(X.groupCount[gi])}</span></button>`).join("");
+  $("x-tgroup").insertAdjacentHTML("beforeend", `<optgroup label="Groups">${XGROUPS.map(([, name], gi) => `<option value="${gi}">${esc(name)}</option>`).join("")}</optgroup>`
+    + `<optgroup label="Record types">${KG.labels.map((l, li) => [xCap(xPlural(li)), li]).sort().map(([n, li]) => `<option value="l${li}">${esc(n)}</option>`).join("")}</optgroup>`);
+  const find = (label, name) => { const l = KG.labels.indexOf(label); return KG.nodes.findIndex((n) => n[0] === l && String(n[2]).toLowerCase() === name.toLowerCase()); };
+  const ex = [];
+  const vg = KG.viruses.find((v) => v.key === "marburg_all"); if (vg) ex.push([{ v: vg }, "Marburg viruses", 0]);
+  for (const [l, nm, short] of [["GeneFamily", "VP35: Polymerase cofactor VP35", "VP35 gene family"], ["Gene", "GP", "Ebola GP gene"], ["Antibody", "KZ52", "KZ52 antibody"], ["Countermeasure", "Inmazeb (REGN-EB3)", "Inmazeb"], ["Symptom", "Fever", "Fever"]]) {
+    let i = find(l, nm);
+    if (i < 0 && l === "GeneFamily") i = KG.nodes.findIndex((n) => KG.labels[n[0]] === l && String(n[2]).startsWith("VP35"));
+    if (i >= 0) ex.push([{ i }, short, X.grp[i]]);
+  }
+  $("x-examples").innerHTML = `<span>Examples:</span>` + ex.map(([, s, g], k) => `<button type="button" data-ex="${k}">${dot(g)}${esc(s)}</button>`).join("");
+  $("x-examples").addEventListener("click", (e) => { const b = e.target.closest("[data-ex]"); if (b) xPick(ex[+b.dataset.ex][0]); });
+  const q = $("x-q"); let qt;
+  q.addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { xSugItems = xSearch(q.value); xSugAt = xSugItems.length ? 0 : -1; xRenderSug(); }, 110); });
+  q.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { if (!xSugItems.length) return; e.preventDefault(); xSugAt = (xSugAt + (e.key === "ArrowDown" ? 1 : -1) + xSugItems.length) % xSugItems.length; xRenderSug(); $("xs-" + xSugAt)?.scrollIntoView({ block: "nearest" }); }
+    else if (e.key === "Enter") { e.preventDefault(); clearTimeout(qt); if (!xSugItems.length) { xSugItems = xSearch(q.value); xSugAt = 0; } if (xSugItems[xSugAt]) xPick(xSugItems[xSugAt]); }
+    else if (e.key === "Escape") { xSugItems = []; xRenderSug(); }
+  });
+  q.addEventListener("blur", () => setTimeout(() => { xSugItems = []; xRenderSug(); }, 150));
+  $("x-sug").addEventListener("mousedown", (e) => { const li = e.target.closest("[data-k]"); if (li) { e.preventDefault(); xPick(xSugItems[+li.dataset.k]); } });
+  for (const id of ["x-hops", "x-hub", "x-sub"]) $(id).addEventListener("change", () => xs.seed && xBuild());
+  $("x-groups").addEventListener("click", (e) => { const b = e.target.closest("[data-g]"); if (!b) return; const g = +b.dataset.g; xs.on[g] = !xs.on[g]; b.setAttribute("aria-pressed", xs.on[g]); xBuild(); });
+  $("x-tgroup").addEventListener("change", () => { xs.shown = 50; xRenderTable(); });
+  $("x-tq").addEventListener("input", () => { xs.shown = 50; xRenderTable(); });
+  $("x-table").addEventListener("click", (e) => { if (e.target.id === "x-more") { xs.shown += 200; xRenderTable(); return; } const tr = e.target.closest("tr.x-row"); if (tr) xSelect(+tr.dataset.i, true); });
+  $("x-table").addEventListener("keydown", (e) => { const tr = e.target.closest("tr.x-row"); if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); xSelect(+tr.dataset.i, true); } });
+  $("x-detail").addEventListener("click", (e) => {
+    if (e.target.id === "x-from") { const i = xs.sel; xSeed({ nodes: [i], kind: lname(X.lab(i)), name: KG.nodes[i][2] }, "push"); return; }
+    const ex = e.target.closest("[data-expand]"); if (ex) { xToggleExpand(+ex.dataset.expand); return; }
+    if (e.target.id === "x-totable") { $("x-tgroup").value = "l" + e.target.dataset.li; $("x-tq").value = ""; xs.shown = 50; xRenderTable(); $("x-table").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    const t = e.target.closest("[data-type]"); if (t) { xSelectType(+t.dataset.type, true); return; }
+    const k = e.target.closest(".x-nb [data-key]"); if (k) { const d = xs.pos.get(k.dataset.key); if (d) { xClickNode(d); xCenter(d.key); } return; }
+    const b = e.target.closest(".x-nb [data-i]"); if (b) xSelect(+b.dataset.i, true);
+  });
+  $("x-fit").addEventListener("click", () => xFit(true));
+  $("x-crumbs").addEventListener("click", (e) => {
+    const st = e.target.closest("[data-step]"); if (st) { xSeed(xs.trail[+st.dataset.step], +st.dataset.step); return; }
+    const m = e.target.closest("[data-merge]"); if (!m) return;
+    if (m.dataset.merge === "all") { xs.expanded.clear(); xLayout(); xRenderDetail(); } else xToggleExpand(+m.dataset.merge);
+  });
+  document.querySelector(".x-mode").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-mode]"); if (!b || b.dataset.mode === xs.mode) return;
+    xs.mode = b.dataset.mode; xs.pos = null;
+    for (const x of document.querySelectorAll(".x-mode button")) x.setAttribute("aria-pressed", x.dataset.mode === xs.mode);
+    xLayout();
+  });
+  $("x-relayout").addEventListener("click", () => { if (xs.sim) { xs.sim.alpha(0.8).restart(); xs.fitted = false; } });
+  document.querySelector(".x-exbtns").addEventListener("click", (e) => { const b = e.target.closest("[data-ex]"); if (b) xExport(b.dataset.ex); });
+  $("x-copycy").addEventListener("click", () => {
+    const text = xExportCypher();
+    navigator.clipboard?.writeText(text).then(() => { $("x-exstat").textContent = "Cypher query copied."; }, () => { xFallback(text); $("x-extext").select(); $("x-exstat").textContent = "Copy isn't allowed here; the query is selected below."; })
+      ?? (xFallback(text), $("x-extext").select());
+  });
+  xInitCanvas();
+  const start = KG.nodes.findIndex((n) => KG.labels[n[0]] === "Countermeasure" && /inmazeb/i.test(n[2]));
+  xSeed(start >= 0 ? { nodes: [start], kind: "Countermeasure", name: KG.nodes[start][2] } : { nodes: [0], kind: lname(X.lab(0)), name: KG.nodes[0][2] });
+}
+function viewExplore() {
+  if (!KG) return;
+  if (!xs.built) { xs.built = true; xInit(); return; }
+  xSize(); xDraw();
+}
+
 // ---------- routing + events ----------
-const VIEWS = { overview: viewOverview, grants: viewGrants, papers: viewPapers, patents: viewPatents, "grants-papers": viewGrantsPapers, "patents-papers": viewPatentsPapers, "grants-patents": viewGrantsPatents };
-let current = "overview";
+const VIEWS = { explore: viewExplore, overview: viewOverview, grants: viewGrants, papers: viewPapers, patents: viewPatents, "grants-papers": viewGrantsPapers, "patents-papers": viewPatentsPapers, "grants-patents": viewGrantsPatents };
+let current = "explore";
 function route() {
   const h = location.hash.slice(1);
-  current = VIEWS[h] ? h : "overview";
+  current = VIEWS[h] ? h : (KG ? "explore" : "overview");
   for (const v of Object.keys(VIEWS)) $("v-" + v).hidden = v !== current;
+  $("doc-filters").hidden = current === "explore";
   for (const a of document.querySelectorAll(".tab")) a.setAttribute("aria-selected", a.dataset.view === current);
   render();
 }
@@ -824,7 +1718,8 @@ document.addEventListener("pointermove", (e) => { const el = e.target.closest?.(
 document.addEventListener("focusin", (e) => { const el = e.target.closest?.("[data-tv]"); if (el) { const r = el.getBoundingClientRect(); showTip(el, r.left + r.width / 2, r.top); } else tip.hidden = true; });
 document.addEventListener("focusout", () => { tip.hidden = true; });
 
-$("built").innerHTML = `Built ${esc(D.built)} by <b>dashboard/build_dashboard.py</b> from data/ and the workstreams' CSV outputs. Rerun it after any of them changes.`;
+$("built").innerHTML = `Document tabs built ${esc(D.built)} by <b>dashboard/build_dashboard.py</b> from data/ and the workstreams' CSV outputs.`
+  + (KG ? ` Graph built ${esc(KG.built)} by <b>dashboard/build_explorer.py</b> from the Neo4j export: ${fmt(KG.nodes.length)} nodes and ${fmt(KG.edges.length / 3)} links. Genome annotation features are folded into protein → sequence links (${fmt(KG.neo4j.relationships)} relationships in Neo4j).` : "");
 applyFilters();
 route();
 </script>

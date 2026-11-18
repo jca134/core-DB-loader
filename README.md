@@ -59,6 +59,51 @@ data instead, try `MATCH (g:Gene {gene_symbol: 'GP'})<-[r]-(n) RETURN g, r, n LI
 To write Cypher yourself, use Neo4j Browser at <http://localhost:7474>
 (user `neo4j`, password `filovirus`).
 
+## Research dashboard
+
+`dashboard/` builds one self-contained page, `dashboard/output/research_dashboard.html`
+(git-ignored), that opens in any browser and is also published as a Claude artifact.
+
+- **Explore the graph** (first tab): search for any virus, protein, gene,
+  epitope, antibody, countermeasure, grant, paper or patent, and see everything
+  within 1–3 steps of it. The drawing starts **by type**: one circle per record
+  type (all papers, all grants, ...), sized by how many there are, with line
+  thickness showing how many links join two types. Double-click a circle to
+  show its records one by one, select any node to fade everything not linked to
+  it, and use **Explore from here** to move into a smaller subgraph (a trail
+  leads back). **Every record** switches to one dot per record.
+  The subgraph exports as JSON, CSV, GraphML, or a Cypher query that returns the
+  same subgraph in Neo4j Browser.
+- **The other tabs** summarize the grants, papers and patents and the links
+  between them.
+
+```bash
+uv run python dashboard/build_dashboard.py   # the whole page; works from a fresh clone
+uv run python dashboard/build_explorer.py    # graph only, into an already built page
+```
+
+Anyone can rebuild the page from a fresh clone. Its two data sets are checked in
+as snapshots in `dashboard/snapshot/`:
+
+- `documents.json.gz`: the grants, papers and patents behind the document tabs.
+  It's rebuilt from the grants workstream's output
+  (`federal-biomedical-tech-datasets-script/output/`) and the patent pipeline's
+  files when those are present, and read from the snapshot when they aren't.
+- `graph.json.gz`: the knowledge graph behind the Explore tab. It's read from
+  Neo4j when Neo4j is running, and from the snapshot when it isn't.
+
+Each build that reads fresh data rewrites the matching snapshot. Commit the
+snapshots after a build so everyone else gets the new data.
+
+`build_explorer.py [page.html]` refreshes only the graph. It reads Neo4j (so run
+`filovirus export` first) and replaces the graph data inside an existing page,
+leaving the document tabs as they are. Use it after the database changes, or on
+a downloaded copy of the published artifact. Without an argument it updates
+`dashboard/output/research_dashboard.html`. It also refreshes `graph.json.gz`.
+To fit under the artifact's 16 MB limit, it drops the 136k genome-annotation
+features (each protein links straight to its sequence instead) and trims
+properties; the Cypher export adds those features back.
+
 ## First-time setup
 
 You need **Python 3.11+**, **[uv](https://docs.astral.sh/uv/)**, **PostgreSQL**
@@ -139,6 +184,7 @@ core_data_loader/
 ├── fetchers/       NIH RePORTER / PubMed lookups → data/     (filovirus fetch)
 ├── etl/            raw.* → core.*, run in order by pipeline.py   (filovirus build)
 └── graph/          Neo4j export, query page, ready-made questions, Claude questions
+dashboard/          research dashboard: template, builders (build_dashboard.py, build_explorer.py), data snapshots
 sql/                schema DDL (01–10) and the data-quality checks (checks.sql)
 tests/              unit tests: pure logic only, no database needed
 docs/               the documentation above
