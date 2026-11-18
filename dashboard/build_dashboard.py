@@ -56,9 +56,6 @@ GRANTS_OUT = GRANTS_WS / "output"
 PATENT_WS = REPO / "patent_pipeline" / "data" / "processed"
 TEMPLATE = HERE / "dashboard.template.html"
 OUT = HERE / "output" / "research_dashboard.html"
-# Checked-in copies of both data sets, so a fresh clone can rebuild the page with
-# neither the workstreams' files nor Neo4j. Every full build refreshes them.
-DOC_SNAPSHOT = HERE / "snapshot" / "documents.json.gz"
 
 sys.path[:0] = [str(REPO), str(GRANTS_WS), str(HERE)]
 from core_data_loader.etl.evidence import (  # noqa: E402
@@ -498,25 +495,14 @@ def document_data() -> dict:
 def main():
     import build_explorer
 
-    # Document tabs: from the workstreams' files when they're here (and the snapshot is
-    # refreshed from them), otherwise from the checked-in snapshot.
-    try:
-        data = document_data()
-        build_explorer.write_snapshot(DOC_SNAPSHOT, data)
-        print(f"  saved {DOC_SNAPSHOT.relative_to(REPO)} (commit it so anyone can rebuild the page)")
-    except FileNotFoundError as e:
-        if not DOC_SNAPSHOT.exists():
-            raise
-        data = build_explorer.read_snapshot(DOC_SNAPSHOT)
-        print(f"Document tabs: {Path(e.filename).relative_to(REPO) if e.filename else e} is missing, "
-              f"so using {DOC_SNAPSHOT.relative_to(REPO)} (built {data['built']})")
+    data = document_data()
 
-    # Explore tab: from Neo4j when it's running (and the snapshot is refreshed), otherwise
-    # from the checked-in snapshot.
+    # Explore tab: from Neo4j when it's running (and the checked-in snapshot is
+    # refreshed), otherwise from that snapshot, so a fresh clone needs no Neo4j.
     try:
         graph = build_explorer.graph_data()
         build_explorer.write_snapshot(build_explorer.SNAPSHOT, graph)
-        print(f"  saved {build_explorer.SNAPSHOT.relative_to(REPO)}")
+        print(f"  saved {build_explorer.SNAPSHOT.relative_to(REPO)} (commit it so anyone can rebuild the page)")
     except Exception as e:  # noqa: BLE001 -- any Neo4j failure means: use the snapshot
         graph = build_explorer.read_snapshot(build_explorer.SNAPSHOT)
         print(f"Graph: Neo4j not reachable ({type(e).__name__}), so using "

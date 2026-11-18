@@ -82,18 +82,14 @@ uv run python dashboard/build_dashboard.py   # the whole page; works from a fres
 uv run python dashboard/build_explorer.py    # graph only, into an already built page
 ```
 
-Anyone can rebuild the page from a fresh clone. Its two data sets are checked in
-as snapshots in `dashboard/snapshot/`:
+Anyone can rebuild the page from a fresh clone, without Neo4j:
 
-- `documents.json.gz`: the grants, papers and patents behind the document tabs.
-  It's rebuilt from the grants workstream's output
-  (`federal-biomedical-tech-datasets-script/output/`) and the patent pipeline's
-  files when those are present, and read from the snapshot when they aren't.
-- `graph.json.gz`: the knowledge graph behind the Explore tab. It's read from
-  Neo4j when Neo4j is running, and from the snapshot when it isn't.
-
-Each build that reads fresh data rewrites the matching snapshot. Commit the
-snapshots after a build so everyone else gets the new data.
+- The document tabs are built from their input files, which are in git
+  (`data/` and `federal-biomedical-tech-datasets-script/output/`; the root
+  `.gitignore` lists the exceptions).
+- The Explore tab's graph is read from Neo4j when it's running, and otherwise
+  from `dashboard/snapshot/graph.json.gz`, a checked-in copy. Every build that
+  reads Neo4j rewrites that file; commit it so everyone else gets the new graph.
 
 `build_explorer.py [page.html]` refreshes only the graph. It reads Neo4j (so run
 `filovirus export` first) and replaces the graph data inside an existing page,
@@ -184,7 +180,7 @@ core_data_loader/
 ├── fetchers/       NIH RePORTER / PubMed lookups → data/     (filovirus fetch)
 ├── etl/            raw.* → core.*, run in order by pipeline.py   (filovirus build)
 └── graph/          Neo4j export, query page, ready-made questions, Claude questions
-dashboard/          research dashboard: template, builders (build_dashboard.py, build_explorer.py), data snapshots
+dashboard/          research dashboard: template, builders (build_dashboard.py, build_explorer.py), graph snapshot
 sql/                schema DDL (01–10) and the data-quality checks (checks.sql)
 tests/              unit tests: pure logic only, no database needed
 docs/               the documentation above

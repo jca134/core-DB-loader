@@ -41,7 +41,8 @@ from core_data_loader.graph.export import LABEL_KEY  # noqa: E402
 from core_data_loader.graph.templates import VIRUSES  # noqa: E402
 
 OUT = HERE / "output" / "research_dashboard.html"
-SNAPSHOT = HERE / "snapshot" / "graph.json.gz"   # checked in; see build_dashboard.py
+# Checked in, so the page can be rebuilt without Neo4j; every read from Neo4j refreshes it.
+SNAPSHOT = HERE / "snapshot" / "graph.json.gz"
 # The template's placeholder line; a built page has the JSON in its place.
 GRAPH_LINE = re.compile(r"^const KG = .*$", re.M)
 MAX_TEXT = 160
