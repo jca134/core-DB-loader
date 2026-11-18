@@ -91,9 +91,18 @@ terminal with `filovirus ask "..."`.
 ## Graph shape
 
 `filovirus graph-report` prints, per node type, the node count, isolated
-nodes, and mean and largest degree, then the biggest hubs. SerenQA prunes
-hubs before walking (Appendix D.3). The gene-family nodes are the largest by
-design: every protein of every filovirus points to one.
+nodes, and mean and largest degree, then the biggest hubs. The gene-family
+nodes are the largest by design: every protein of every filovirus points to
+one, which makes them the bridges between viruses.
+
+SerenQA doesn't remove hubs. Its 3-hop transition matrix is row-normalized, so
+a node with thousands of links passes only a small share of probability to
+each neighbor, and Novelty and Surprise are computed from those
+probabilities. Where a hub has too many neighbors to show the LLM, it ranks
+them by edge confidence and passes on the best ones (Appendix D.3, "Neighbor
+Scoring"), which is what `confidence` on `RELATED`, `CITES`, `CLAIMS` and
+`DESCRIBES` is for. So the graph keeps every hub, and so does the dashboard's
+subgraph explorer.
 
 ## Safety
 

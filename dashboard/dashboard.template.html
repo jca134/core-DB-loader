@@ -340,9 +340,6 @@ code { font-family: var(--font-mono); font-size: .92em; background: var(--chip);
       <label class="field">Steps out
         <select id="x-hops"><option value="1">1 step</option><option value="2" selected>2 steps</option><option value="3">3 steps</option></select>
       </label>
-      <label class="field">Stop at hubs with more than
-        <select id="x-hub"><option value="25">25 links</option><option value="100" selected>100 links</option><option value="500">500 links</option><option value="0">No limit</option></select>
-      </label>
       <label class="x-check"><input type="checkbox" id="x-sub" checked> Include sub-taxa and strains of a virus</label>
       <div class="x-groups" id="x-groups" role="group" aria-label="Node types to include"></div>
     </div>
@@ -541,7 +538,7 @@ code { font-family: var(--font-mono); font-size: .92em; background: var(--chip);
   <footer>
     <div><b>Sources.</b> Grants: NIH RePORTER projects and publications (federal-biomedical-tech-datasets-script). Papers: the papers workstream's bundle, and PubMed records of grant-cited and patent-cited papers, with their grant lists and reference lists. Patents: USPTO Patent Public Search and Google Patents, including each patent's government-interest statement and citation tables (patent_pipeline, filovirus fetch patent-details).</div>
     <div><b>Grant years</b> are the project start and end dates. 106 grants have none in RePORTER, so their first and last fiscal year in the pull is used (marked “fiscal years” in the Grants table).</div>
-    <div><b>Explore the graph</b> uses the knowledge graph itself (Postgres core.* exported to Neo4j): taxa, isolates, sequences, proteins, gene families, structures, epitopes and assays, antibodies, countermeasures, clinical studies, and the same grants, papers and patents. A step is one relationship in either direction. Hubs, such as a gene family that every protein of every filovirus points to, are kept but not walked through, so one gene family doesn't pull in tens of thousands of proteins.</div>
+    <div><b>Explore the graph</b> uses the knowledge graph itself (Postgres core.* exported to Neo4j): taxa, isolates, sequences, proteins, gene families, structures, epitopes and assays, antibodies, countermeasures, clinical studies, and the same grants, papers and patents. A step is one relationship in either direction, and every node is walked through, however many links it has: SerenQA scores paths through highly connected nodes rather than cutting them, and some of them (each gene family, which every protein of every filovirus points to) are the bridges between viruses. That makes subgraphs grow fast; three steps from most records reaches much of the graph.</div>
     <div><b>Viruses and proteins</b> come from each workstream's own keyword matching against the knowledge graph vocabulary (kg_keywords.csv), mapped onto one list here: Ebola viruses, Marburg viruses, the filovirus family named generally, and the nine filovirus proteins. Patent matches are candidates; some are flagged for review.</div>
     <div id="built"></div>
   </footer>
@@ -965,7 +962,7 @@ const XLNAME = { Publication: "Paper", GrantFunding: "Grant funding year", Epito
 const lname = (l) => XLNAME[l] || l;
 // Search ranking: records people look up by name come before bulk records with generic names.
 const XPRI = { Taxon: 0, GeneFamily: 0, Gene: 1, Countermeasure: 1, Antibody: 1, Condition: 1, Symptom: 1, Structure: 2, Epitope: 2, Grant: 2, Publication: 2, Patent: 2, Organization: 2, AssayType: 2, Study: 2, GeneDomain: 3, Isolate: 4, Protein: 5, Sequence: 5, EpitopeAssay: 5, GrantFunding: 5, Feature: 5 };
-const XCAP = 30000, XDRAW = 1500, XEXP = 300;
+const XDRAW = 1500, XEXP = 300;
 
 const X = KG && (() => {
   const N = KG.nodes.length, E = KG.edges.length / 3, ed = KG.edges;
@@ -1072,8 +1069,8 @@ function xToggleExpand(li) {
   xLayout(); xRenderDetail();
 }
 function xBuild() {
-  const seed = xs.seed, hops = +$("x-hops").value, hubLim = +$("x-hub").value || Infinity, withSub = $("x-sub").checked;
-  const hop = new Map(), hubs = new Set();
+  const seed = xs.seed, hops = +$("x-hops").value, withSub = $("x-sub").checked;
+  const hop = new Map();
   let roots = [...seed.nodes];
   if (withSub) {   // walk CHILD_OF down from any taxon in the seed
     const stack = roots.filter((i) => X.lab(i) === "Taxon"), seen = new Set(roots);
@@ -1089,16 +1086,14 @@ function xBuild() {
     }
   }
   roots.forEach((r) => hop.set(r, 0));
-  let frontier = roots, truncated = false;
-  outer: for (let d = 1; d <= hops && frontier.length; d++) {
+  let frontier = roots;
+  for (let d = 1; d <= hops && frontier.length; d++) {
     const next = [];
     for (const u of frontier) {
-      if (d > 1 && X.deg[u] > hubLim) { hubs.add(u); continue; }
       for (let k = X.off[u]; k < X.off[u + 1]; k++) {
         const v = X.nb[k];
         if (hop.has(v) || !xs.on[X.grp[v]]) continue;
         hop.set(v, d); next.push(v);
-        if (hop.size >= XCAP) { truncated = true; break outer; }
       }
     }
     frontier = next;
@@ -1111,24 +1106,25 @@ function xBuild() {
     if (!hop.has(v)) continue;
     edges.push(e); sdeg.set(u, (sdeg.get(u) || 0) + 1); sdeg.set(v, (sdeg.get(v) || 0) + 1);
   }
-  xs.sub = { nodes, edges, hop, hubs, sdeg, truncated, hops, hubLim, roots: new Set(roots) };
+  xs.sub = { nodes, edges, hop, sdeg, hops, roots: new Set(roots) };
   if (xs.sel !== null && !hop.has(xs.sel)) xs.sel = roots[0] ?? null;
   xRenderSummary(); xRenderTable(); xRenderDetail(); xLayout();
 }
 
 function xRenderSummary() {
-  const { nodes, edges, hubs, hop, truncated, hops, hubLim, roots } = xs.sub, seed = xs.seed;
+  const { nodes, edges, hops, roots } = xs.sub, seed = xs.seed;
   $("x-seedkind").textContent = seed.kind;
   $("x-seedname").textContent = seed.name;
   const extra = roots.size > seed.nodes.length ? ` Starts from ${fmt(roots.size)} taxa: the ${seed.nodes.length > 1 ? `${seed.nodes.length} roots` : "root"} and every sub-taxon and strain under it.` : "";
-  $("x-seednote").textContent = `Everything within ${hops} step${hops > 1 ? "s" : ""} of it in the knowledge graph${hubLim < Infinity ? `, stopping at hubs with more than ${fmt(hubLim)} links` : ""}.${extra}${truncated ? ` Stopped at ${fmt(XCAP)} nodes; use fewer steps or a lower hub limit to see the rest.` : ""}`;
+  const share = nodes.length / X.N;
+  $("x-seednote").textContent = `Everything within ${hops} step${hops > 1 ? "s" : ""} of it in the knowledge graph.${extra}${share >= 0.2 ? ` That's ${Math.round(share * 100)}% of the whole graph; fewer steps give a more specific picture.` : ""}`;
   const types = new Set(nodes.map((i) => KG.nodes[i][0]));
   const docs = nodes.filter((i) => X.grp[i] >= 4 && X.grp[i] <= 6).length;
   tiles($("x-tiles"), [
-    ["Nodes", fmt(nodes.length), `${types.size} record types`],
+    ["Nodes", fmt(nodes.length), `within ${hops} step${hops > 1 ? "s" : ""}`],
     ["Links", fmt(edges.length), "between those nodes"],
     ["Documents", fmt(docs), "grants, papers and patents"],
-    ["Hubs not expanded", fmt(hubs.size), hubs.size ? "kept, but not walked through" : "none reached"],
+    ["Record types", fmt(types.size), `of ${KG.labels.length} in the graph`],
   ]);
   const byG = XGROUPS.map(() => 0); nodes.forEach((i) => byG[X.grp[i]]++);
   $("x-seg").innerHTML = byG.map((c, gi) => c ? `<span style="flex:${c} 1 0;background:var(--g-${XGROUPS[gi][0]})" title="${esc(XGROUPS[gi][1])}: ${fmt(c)}"></span>` : "").join("");
@@ -1147,7 +1143,7 @@ function xRenderTable() {
   const total = rows.length; rows = rows.slice(0, xs.shown);
   $("x-table").innerHTML = total ? `<div class="table-wrap"><table class="data"><thead><tr><th>Type</th><th>Name</th><th>ID</th><th>Steps</th><th>Links here / total</th></tr></thead><tbody>${rows.map((i) => `
     <tr class="x-row" data-i="${i}" aria-selected="${i === xs.sel}" tabindex="0"><td><span class="x-kind">${dot(X.grp[i])}${esc(lname(X.lab(i)))}</span></td>
-    <td>${esc(KG.nodes[i][2])}${xs.sub.hubs.has(i) ? ` <span class="chip">hub, not expanded</span>` : ""}</td>
+    <td>${esc(KG.nodes[i][2])}</td>
     <td class="num">${esc(keyProp(i))} ${esc(KG.nodes[i][1])}</td><td class="num">${hop.get(i)}</td>
     <td class="num">${fmt(sdeg.get(i) || 0)} / ${fmt(X.deg[i])}</td></tr>`).join("")}</tbody></table></div>
     ${total > rows.length ? `<div class="more"><button class="btn" type="button" id="x-more">Show more (${fmt(total - rows.length)} left)</button></div>` : ""}`
@@ -1187,7 +1183,7 @@ function xRenderDetail() {
     <span class="x-kind">${dot(X.grp[i])}${esc(lname(X.lab(i)))}</span>
     <p class="x-name">${esc(n[2])}</p>
     <dl class="x-props"><dt>${esc(keyProp(i))}</dt><dd>${esc(n[1])}</dd>${props}${n[4] ? `<dt>also</dt><dd>${esc(n[4])}</dd>` : ""}</dl>
-    <p class="note">${fmt(X.deg[i])} links in the graph · ${fmt(sdeg.get(i) || 0)} in this subgraph · ${hop.get(i)} step${hop.get(i) === 1 ? "" : "s"} from the start${xs.sub.hubs.has(i) ? " · hub, not expanded" : ""}</p>
+    <p class="note">${fmt(X.deg[i])} links in the graph · ${fmt(sdeg.get(i) || 0)} in this subgraph · ${hop.get(i)} step${hop.get(i) === 1 ? "" : "s"} from the start</p>
     <div class="x-acts">${xs.sub.roots.has(i) && xs.seed.nodes.length === 1 ? "" : `<button class="btn primary" type="button" id="x-from">Explore from here</button>`}
       ${lk ? `<a class="btn" href="${esc(lk[0])}" target="_blank" rel="noopener">Open in ${esc(lk[1])} ↗</a>` : ""}
       ${xs.mode === "type" && typeKey === "t" + li ? `<button class="btn" type="button" data-type="${li}">All ${esc(xPlural(li))}</button>` : ""}
@@ -1243,11 +1239,11 @@ function xCenter(key) {
 // becomes one circle sized by its count, and links between two types merge into one line whose
 // width shows how many links it stands for. "record": one dot per record, up to XDRAW of them.
 function xBuildDrawn() {
-  const { nodes, edges, hop, sdeg, roots, hubs } = xs.sub, keyOf = new Map(), drawn = new Map();
+  const { nodes, edges, hop, sdeg, roots } = xs.sub, keyOf = new Map(), drawn = new Map();
   const seedKey = roots.size > 1 ? "seed" : null;
   const add = (key, i, extra) => {
     let d = drawn.get(key);
-    if (!d) { d = { key, members: [], gi: X.grp[i], li: KG.nodes[i][0], root: false, hub: false, inner: 0, innerRels: new Map(), ...extra }; drawn.set(key, d); }
+    if (!d) { d = { key, members: [], gi: X.grp[i], li: KG.nodes[i][0], root: false, inner: 0, innerRels: new Map(), ...extra }; drawn.set(key, d); }
     d.members.push(i); keyOf.set(i, key);
   };
   if (xs.mode === "type") {
@@ -1258,19 +1254,19 @@ function xBuildDrawn() {
     // Types broken apart: their XEXP most connected records one by one, the rest stay merged.
     for (const li of xs.expanded) {
       const ms = nodes.filter((i) => KG.nodes[i][0] === li && !roots.has(i)).sort((a, b) => (sdeg.get(b) || 0) - (sdeg.get(a) || 0));
-      ms.forEach((i, k) => k < XEXP ? add("n" + i, i, { i, name: KG.nodes[i][2], hub: hubs.has(i), exp: true }) : add("t" + li, i, { name: "Other " + xPlural(li) }));
+      ms.forEach((i, k) => k < XEXP ? add("n" + i, i, { i, name: KG.nodes[i][2], exp: true }) : add("t" + li, i, { name: "Other " + xPlural(li) }));
     }
     for (const d of drawn.values()) {
       if (d.key.startsWith("t") && d.members.length === 1 && !xs.expanded.has(d.li)) {   // a type with one record shows that record
         const i = d.members[0]; drawn.delete(d.key);
-        add("n" + i, i, { i, name: KG.nodes[i][2], hub: hubs.has(i) });
+        add("n" + i, i, { i, name: KG.nodes[i][2] });
       }
     }
     for (const d of drawn.values()) d.r = d.members.length > 1 ? Math.min(52, 9 + 3.4 * Math.sqrt(d.members.length)) : d.root ? 14 : d.exp ? Math.min(10, 4 + Math.sqrt(sdeg.get(d.members[0]) || 0) * 0.7) : 10;
   } else {
     let pick = nodes;
     if (nodes.length > XDRAW) pick = [...nodes].sort((a, b) => hop.get(a) - hop.get(b) || (sdeg.get(b) || 0) - (sdeg.get(a) || 0)).slice(0, XDRAW);
-    for (const i of pick) add("n" + i, i, { i, name: KG.nodes[i][2], root: roots.has(i), hub: hubs.has(i), r: roots.has(i) ? 9 : Math.min(9, 3 + Math.sqrt(sdeg.get(i) || 0) * 0.8) });
+    for (const i of pick) add("n" + i, i, { i, name: KG.nodes[i][2], root: roots.has(i), r: roots.has(i) ? 9 : Math.min(9, 3 + Math.sqrt(sdeg.get(i) || 0) * 0.8) });
   }
   const links = new Map();
   for (const e of edges) {
@@ -1387,12 +1383,10 @@ function xDraw() {
   ctx.globalAlpha = 1;
   ctx.strokeStyle = xs.fg;
   for (const d of xs.drawn) {
-    if (!d.root && !d.hub && d.key !== sel) continue;
+    if (!d.root && d.key !== sel) continue;
     ctx.beginPath(); ctx.lineWidth = (d.key === sel ? 2.5 : 1.5) / t.k;
-    ctx.setLineDash(d.hub && !d.root ? [3 / t.k, 2 / t.k] : []);
     ctx.arc(d.x, d.y, d.r + 2.5 / t.k, 0, 2 * Math.PI); ctx.stroke();
   }
-  ctx.setLineDash([]);
   ctx.lineJoin = "round"; ctx.textBaseline = "middle";
   const short = (s, n) => (s = String(s), s.length > n ? s.slice(0, n - 2) + "…" : s);
   if (type) {
@@ -1507,10 +1501,10 @@ function xEdgeRow(e) {
   return { a, b, type: KG.rels[KG.edges[3 * e + 2]], confidence: ep ? ep[0] : null, matched_terms: ep ? ep[1] : "", support_count: ep ? ep[2] : null };
 }
 function xExportJSON() {
-  const { nodes, edges, hop, hops, hubLim } = xs.sub;
+  const { nodes, edges, hop, hops } = xs.sub;
   return JSON.stringify({
     seed: { kind: xs.seed.kind, name: xs.seed.name, ids: xs.seed.nodes.map(nodeId) },
-    settings: { steps: hops, hub_limit: hubLim === Infinity ? null : hubLim, include_subtaxa: $("x-sub").checked, types: XGROUPS.filter((g, gi) => xs.on[gi]).map((g) => g[1]) },
+    settings: { steps: hops, include_subtaxa: $("x-sub").checked, types: XGROUPS.filter((g, gi) => xs.on[gi]).map((g) => g[1]) },
     graph_built: KG.built,
     nodes: nodes.map((i) => ({ id: nodeId(i), label: X.lab(i), key_property: keyProp(i), key: KG.nodes[i][1], name: KG.nodes[i][2], steps: hop.get(i), properties: KG.nodes[i][3] || {} })),
     links: edges.map((e) => { const r = xEdgeRow(e); const o = { source: nodeId(r.a), target: nodeId(r.b), type: r.type }; if (r.confidence !== null || r.matched_terms) Object.assign(o, { confidence: r.confidence, matched_terms: r.matched_terms, support_count: r.support_count }); return o; }),
@@ -1626,7 +1620,7 @@ function xInit() {
   });
   q.addEventListener("blur", () => setTimeout(() => { xSugItems = []; xRenderSug(); }, 150));
   $("x-sug").addEventListener("mousedown", (e) => { const li = e.target.closest("[data-k]"); if (li) { e.preventDefault(); xPick(xSugItems[+li.dataset.k]); } });
-  for (const id of ["x-hops", "x-hub", "x-sub"]) $(id).addEventListener("change", () => xs.seed && xBuild());
+  for (const id of ["x-hops", "x-sub"]) $(id).addEventListener("change", () => xs.seed && xBuild());
   $("x-groups").addEventListener("click", (e) => { const b = e.target.closest("[data-g]"); if (!b) return; const g = +b.dataset.g; xs.on[g] = !xs.on[g]; b.setAttribute("aria-pressed", xs.on[g]); xBuild(); });
   $("x-tgroup").addEventListener("change", () => { xs.shown = 50; xRenderTable(); });
   $("x-tq").addEventListener("input", () => { xs.shown = 50; xRenderTable(); });
