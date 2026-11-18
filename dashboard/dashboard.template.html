@@ -1,0 +1,772 @@
+<title>Filovirus Research Dashboard</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one filter row scopes everything; tabs switch between an overview, the three collections
+   and the three pairs. Each tab: stat tiles, then charts in a two-column grid, then a searchable table. */
+:root {
+  --bg: #f5f6f3;
+  --surface: #ffffff;
+  --fg: #1b2420;
+  --muted: #5d6a64;
+  --rule: #dfe3de;
+  --grid: #e9ece8;
+  --accent: #0e6b5f;
+  --accent-soft: #d3e9e4;
+  --chip: #eef1ec;
+  /* one hue per collection (validated: CVD + normal-vision separation, contrast on --surface) */
+  --c-grant: #008a6e;
+  --c-paper: #5a52c9;
+  --c-patent: #c25a1c;
+  /* grant -> paper topic patterns, as on the Grant-Paper Links page */
+  --k-stay: #008a78;
+  --k-adds: #c07a12;
+  --k-none: #9a3f9f;
+  --k-empty: #a3ada8;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121715; --surface: #19201d; --fg: #e3e9e5; --muted: #98a59f; --rule: #2b3531; --grid: #242d29;
+    --accent: #4fc0ad; --accent-soft: #1d3a35; --chip: #222b28;
+    --c-grant: #22a088; --c-paper: #8a84ee; --c-patent: #d66f33;
+    --k-stay: #1f9c88; --k-adds: #c9821f; --k-none: #b066b0; --k-empty: #5f6b66;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121715; --surface: #19201d; --fg: #e3e9e5; --muted: #98a59f; --rule: #2b3531; --grid: #242d29;
+  --accent: #4fc0ad; --accent-soft: #1d3a35; --chip: #222b28;
+  --c-grant: #22a088; --c-paper: #8a84ee; --c-patent: #d66f33;
+  --k-stay: #1f9c88; --k-adds: #c9821f; --k-none: #b066b0; --k-empty: #5f6b66;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap {
+  max-width: 1180px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px;
+}
+header { display: grid; gap: 8px; margin-bottom: 18px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(26px, 4vw, 38px); line-height: 1.1; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 500; font-size: 20px; line-height: 1.2; margin: 0; text-wrap: balance; }
+h3 { margin: 0; font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-family: var(--font-mono); }
+.lede { max-width: 72ch; color: var(--muted); margin: 0; }
+.lede b { color: var(--fg); font-weight: 600; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+/* filter row */
+.filters { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; padding: 12px 0; border-top: 2px solid var(--fg); border-bottom: 1px solid var(--rule); }
+.field { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+select, input[type="search"] { font: inherit; font-size: 14px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--rule); background: var(--surface); color: var(--fg); max-width: 100%; }
+.years { display: flex; gap: 6px; align-items: center; }
+.btn { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--rule); background: var(--surface); color: var(--fg); cursor: pointer; }
+.btn:hover { border-color: var(--accent); }
+.scope { flex: 1 1 260px; font-size: 13px; color: var(--muted); align-self: center; text-align: right; font-variant-numeric: tabular-nums; }
+.scope b { color: var(--fg); font-weight: 500; }
+
+/* tabs */
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 14px 0 22px; }
+.tab { font: inherit; font-size: 14px; padding: 7px 12px; border-radius: 6px; border: 1px solid transparent; background: none; color: var(--muted); cursor: pointer; display: inline-flex; gap: 7px; align-items: center; text-decoration: none; }
+.tab:hover { color: var(--fg); background: var(--chip); }
+.tab[aria-selected="true"] { color: var(--fg); background: var(--surface); border-color: var(--rule); font-weight: 500; }
+.tab .sep { color: var(--muted); font-weight: 400; }
+.dotk { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.dk-grant { background: var(--c-grant); } .dk-paper { background: var(--c-paper); } .dk-patent { background: var(--c-patent); }
+
+.view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
+.view-head { display: grid; gap: 4px; }
+.view-head p { margin: 0; font-size: 14px; color: var(--muted); max-width: 76ch; }
+
+/* stat tiles */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.tile { display: grid; gap: 2px; align-content: start; padding: 12px 16px 12px 0; min-width: 0; }
+.tile + .tile { padding-left: 16px; border-left: 1px solid var(--rule); }
+.tile .l { font-size: 13px; color: var(--muted); }
+.tile .v { font-size: 30px; font-weight: 600; line-height: 1.15; }
+.tile .s { font-size: 12px; color: var(--muted); }
+
+/* panels and charts */
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.panel.wide { grid-column: 1 / -1; }
+.panel > p, .panel .note { margin: 0; font-size: 13px; color: var(--muted); max-width: 70ch; }
+.panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 12px; }
+.chart { width: 100%; min-height: 40px; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.chart .gl { stroke: var(--grid); stroke-width: 1; }
+.chart .axis { stroke: var(--rule); stroke-width: 1; }
+.chart .hit { fill: transparent; cursor: default; }
+.chart .col:hover .mark, .chart .col:focus-within .mark { filter: brightness(1.15); }
+.chart .hit:focus { outline: none; }
+.chart .hit:focus-visible { stroke: var(--accent); stroke-width: 1.5; }
+.empty-chart { font-size: 13px; color: var(--muted); padding: 18px 0; }
+details.tv { font-size: 12px; color: var(--muted); }
+details.tv summary { cursor: pointer; width: max-content; }
+details.tv .tv-wrap { max-height: 220px; overflow: auto; margin-top: 6px; }
+details.tv table { min-width: 0; width: auto; }
+details.tv td, details.tv th { padding: 3px 14px 3px 0; border: 0; }
+
+.hbars { display: grid; gap: 7px; }
+.hb { display: grid; gap: 3px; font-size: 13px; width: 100%; text-align: left; font: inherit; font-size: 13px; color: inherit; background: none; border: 0; padding: 4px 6px; margin: 0 -6px; border-radius: 6px; }
+button.hb { cursor: pointer; }
+button.hb:hover { background: var(--chip); }
+button.hb[aria-pressed="true"] { background: var(--accent-soft); }
+.hb-label { display: flex; justify-content: space-between; gap: 10px; }
+.hb-label span:first-child { overflow-wrap: anywhere; min-width: 0; }
+.hb-label .v { font-family: var(--font-mono); font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hb-label .v b { color: var(--fg); font-weight: 500; }
+.hb-track { height: 8px; border-radius: 0 4px 4px 0; }
+.hb-fill { display: block; height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; }
+
+.seg { display: flex; gap: 2px; height: 28px; }
+.seg span { display: flex; align-items: center; padding-left: 8px; border-radius: 4px; font-size: 12px; font-weight: 500; color: #fff; white-space: nowrap; overflow: hidden; min-width: 0; font-variant-numeric: tabular-nums; }
+.seg span.dark-text { color: #1b2420; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.k-stay { background: var(--k-stay); } .k-adds { background: var(--k-adds); } .k-none { background: var(--k-none); } .k-empty { background: var(--k-empty); }
+
+/* overview map + matrix */
+.map svg { display: block; width: 100%; max-width: 560px; margin: 0 auto; }
+.map text { font-family: var(--font-body); fill: var(--fg); }
+.map .nname { font-family: var(--font-display); font-size: 17px; font-weight: 600; }
+.map .ncount { font-family: var(--font-mono); font-size: 12px; fill: var(--muted); }
+.map .elabel { font-family: var(--font-mono); font-size: 12px; }
+.map .ebox { fill: var(--surface); stroke: var(--rule); }
+.map a:hover .ebox, .map a:focus .ebox { stroke: var(--accent); }
+.map a:focus { outline: none; }
+.matrix-wrap { overflow-x: auto; }
+.matrix { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 13px; }
+.matrix th, .matrix td { padding: 5px 10px 5px 0; text-align: left; border-bottom: 1px solid var(--rule); }
+.matrix th { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.matrix td.ent button { font: inherit; color: var(--fg); background: none; border: 0; padding: 2px 0; cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+.matrix td.ent button:hover { text-decoration-color: var(--accent); }
+.matrix .kind { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-right: 6px; }
+.mcell { display: grid; grid-template-columns: 1fr 74px; gap: 8px; align-items: center; }
+.mtrack { height: 8px; background: var(--chip); border-radius: 0 4px 4px 0; }
+.mfill { display: block; height: 100%; border-radius: 0 4px 4px 0; }
+.mval { font-family: var(--font-mono); font-size: 12px; color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mval b { color: var(--fg); font-weight: 500; }
+
+/* tables */
+.tbl-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; }
+.tbl-head input { flex: 0 1 320px; min-width: 0; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
+table.data { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 13px; }
+table.data th, table.data td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+table.data th { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-weight: 500; white-space: nowrap; }
+table.data th button { font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+table.data th button:hover, table.data th button[data-on="1"] { color: var(--fg); }
+table.data tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 12px; white-space: nowrap; }
+td a, .link { color: var(--fg); text-decoration-color: var(--accent); text-underline-offset: 2px; }
+td a:hover { color: var(--accent); }
+.sub { color: var(--muted); font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.chip { font-size: 11px; padding: 1px 7px; border-radius: 4px; background: var(--chip); white-space: nowrap; }
+.chip.v { font-weight: 500; }
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; margin: 1px 4px 1px 0; background: var(--chip); color: var(--fg); }
+.pill i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 999px; border: 1px dashed var(--muted); color: var(--fg); width: max-content; }
+.more { display: flex; justify-content: center; padding: 12px 0 0; }
+.none { color: var(--muted); font-size: 13px; padding: 20px; text-align: center; }
+
+#tip { position: fixed; z-index: 50; pointer-events: none; background: var(--surface); color: var(--fg); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.12); max-width: 280px; }
+#tip b { display: block; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#tip span { color: var(--muted); }
+
+footer { margin-top: 32px; font-size: 12px; color: var(--muted); max-width: 88ch; display: grid; gap: 6px; }
+footer b { color: var(--fg); font-weight: 500; }
+
+@media (max-width: 860px) {
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile:nth-child(3) { padding-left: 0; border-left: 0; }
+  .tile:nth-child(n+3) { border-top: 1px solid var(--rule); }
+  .scope { text-align: left; flex-basis: 100%; }
+}
+@media (max-width: 420px) { .tile .v { font-size: 24px; } }
+@media (prefers-reduced-motion: no-preference) { .tab, .hb, .btn { transition: background-color .15s, border-color .15s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Filovirus knowledge graph · NIH grants · PubMed papers · US patents</div>
+    <h1>Filovirus Research Dashboard</h1>
+    <p class="lede">The three document collections behind the knowledge graph, and the links between them. <b>Filters apply to every tab.</b> A link is counted when both of its ends pass the filters.</p>
+  </header>
+
+  <div class="filters" role="group" aria-label="Filters">
+    <label class="field">Virus
+      <select id="f-virus"><option value="">Any virus</option></select>
+    </label>
+    <label class="field">Protein
+      <select id="f-protein"><option value="">Any protein</option></select>
+    </label>
+    <div class="field"><span id="years-label">Years</span>
+      <div class="years" role="group" aria-labelledby="years-label">
+        <select id="f-y0" aria-label="From year"></select><span>to</span><select id="f-y1" aria-label="To year"></select>
+      </div>
+    </div>
+    <button class="btn" id="reset" type="button">Reset filters</button>
+    <div class="scope" id="scope" aria-live="polite"></div>
+  </div>
+
+  <nav class="tabs" role="tablist" aria-label="Views" id="tabs">
+    <a class="tab" role="tab" href="#overview" data-view="overview">Overview</a>
+    <a class="tab" role="tab" href="#grants" data-view="grants"><i class="dotk dk-grant"></i>Grants</a>
+    <a class="tab" role="tab" href="#papers" data-view="papers"><i class="dotk dk-paper"></i>Papers</a>
+    <a class="tab" role="tab" href="#patents" data-view="patents"><i class="dotk dk-patent"></i>Patents</a>
+    <a class="tab" role="tab" href="#grants-papers" data-view="grants-papers">Grants <span class="sep">×</span> Papers</a>
+    <a class="tab" role="tab" href="#patents-papers" data-view="patents-papers">Patents <span class="sep">×</span> Papers</a>
+    <a class="tab" role="tab" href="#grants-patents" data-view="grants-patents">Grants <span class="sep">×</span> Patents</a>
+  </nav>
+
+  <!-- OVERVIEW -->
+  <section class="view" id="v-overview" role="tabpanel" aria-label="Overview">
+    <div class="tiles" id="ov-tiles"></div>
+    <div class="grid2">
+      <div class="panel">
+        <h2>How the collections connect</h2>
+        <p>Lines are links between documents. Select one to open that view.</p>
+        <div class="map" id="ov-map"></div>
+      </div>
+      <div class="panel">
+        <h2>Over time</h2>
+        <p>Grants by fiscal year funded, papers by publication year, patents by filing year. Same year axis on all three.</p>
+        <h3>Grants funded</h3><div class="chart" id="ov-t-grants"></div>
+        <h3>Papers published</h3><div class="chart" id="ov-t-papers"></div>
+        <h3>Patents filed</h3><div class="chart" id="ov-t-patents"></div>
+      </div>
+      <div class="panel wide">
+        <div class="panel-head"><h2>What each collection is about</h2></div>
+        <p>Share of documents that name each virus or protein in their title or abstract. The year filter applies; the virus and protein filters don't, so the rows stay comparable. Select a name to filter every tab by it.</p>
+        <div class="matrix-wrap"><table class="matrix" id="ov-matrix"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- GRANTS -->
+  <section class="view" id="v-grants" role="tabpanel" aria-label="Grants" hidden>
+    <div class="view-head"><h2>NIH grants</h2><p>NIH RePORTER awards whose titles or abstracts name a filovirus or filovirus protein. Funding counts the parent award only, since a multi-project grant's parent amount already includes its subprojects.</p></div>
+    <div class="tiles" id="gr-tiles"></div>
+    <div class="grid2">
+      <div class="panel wide"><h2>Funding by fiscal year</h2><div class="chart" id="gr-fund"></div></div>
+      <div class="panel"><h2>Institutes</h2><p>Administering NIH institute, by funding.</p><div class="hbars" id="gr-ic"></div></div>
+      <div class="panel"><h2>Award types</h2><p>NIH activity code, by number of grants.</p><div class="hbars" id="gr-act"></div></div>
+      <div class="panel wide"><h2>Organizations with the most grants</h2><div class="hbars" id="gr-org"></div></div>
+    </div>
+    <div class="panel">
+      <div class="tbl-head"><h2>Grants</h2><input type="search" id="q-grants" placeholder="Search number, title, PI, organization" aria-label="Search grants"></div>
+      <div id="t-grants"></div>
+    </div>
+  </section>
+
+  <!-- PAPERS -->
+  <section class="view" id="v-papers" role="tabpanel" aria-label="Papers" hidden>
+    <div class="view-head"><h2>Papers</h2><p>Two sources: the <b>core set</b> of 240 filovirus papers from the papers workstream, and filovirus papers that NIH RePORTER or PubMed tie to one of the grants. A paper counts as filovirus when a filovirus name is in its title or MeSH headings, or twice in its abstract.</p></div>
+    <div class="filters" style="border-top-width:1px" role="group" aria-label="Paper set">
+      <label class="field">Paper set
+        <select id="f-pset"><option value="all">All papers</option><option value="core">Core set</option><option value="grant">Found through grants</option></select>
+      </label>
+    </div>
+    <div class="tiles" id="pa-tiles"></div>
+    <div class="grid2">
+      <div class="panel wide"><h2>Papers by publication year</h2><div class="chart" id="pa-year"></div></div>
+      <div class="panel"><h2>Journals</h2><p>Most frequent journals.</p><div class="hbars" id="pa-jour"></div></div>
+      <div class="panel"><h2>Where the core set came from</h2><p>Database that referenced each core-set paper. A paper can come from several.</p><div class="hbars" id="pa-src"></div></div>
+    </div>
+    <div class="panel">
+      <div class="tbl-head"><h2>Papers</h2><input type="search" id="q-papers" placeholder="Search title, journal, PMID" aria-label="Search papers"></div>
+      <div id="t-papers"></div>
+    </div>
+  </section>
+
+  <!-- PATENTS -->
+  <section class="view" id="v-patents" role="tabpanel" aria-label="Patents" hidden>
+    <div class="view-head"><h2>US patents</h2><p>USPTO patents and published applications about filoviruses: 72 from searches restricted to two CPC classes, plus 100 from a broader abstract search. Kind code B is a granted patent; A is a published application. Three inventions appear twice, as an application and as the patent later granted for it, so counts are of documents.</p></div>
+    <div class="tiles" id="pt-tiles"></div>
+    <div class="grid2">
+      <div class="panel wide"><h2>Patents by filing year</h2><div class="chart" id="pt-year"></div></div>
+      <div class="panel"><h2>How each patent was found</h2><div class="hbars" id="pt-how"></div></div>
+      <div class="panel"><h2>Virus and protein links</h2><p>Keyword matches in the patent's title or abstract, from the patent pipeline's review script. Generic protein words and abstract-only matches are flagged for review.</p><div id="pt-review"></div></div>
+      <div class="panel"><h2>Assignees</h2><p>Most patents in the set list no assignee.</p><div class="hbars" id="pt-asg"></div></div>
+      <div class="panel"><h2>First-named inventors</h2><p>Inventors with more than one patent. Only the first-named inventor is recorded.</p><div class="hbars" id="pt-inv"></div></div>
+    </div>
+    <div class="panel">
+      <div class="tbl-head"><h2>Patents</h2><input type="search" id="q-patents" placeholder="Search number, title, assignee, inventor" aria-label="Search patents"></div>
+      <div id="t-patents"></div>
+    </div>
+  </section>
+
+  <!-- GRANTS x PAPERS -->
+  <section class="view" id="v-grants-papers" role="tabpanel" aria-label="Grants and papers" hidden>
+    <div class="view-head"><h2>Grants × Papers</h2><p>A paper is linked to a grant when it <b>cites</b> it (the paper's PubMed record lists the grant, or RePORTER lists the paper under the grant), or when a grant PI <b>wrote it</b> after the award started and it is on the grant's topic.</p></div>
+    <div class="tiles" id="gp-tiles"></div>
+    <div class="grid2">
+      <div class="panel"><h2>How the links were found</h2><p>A link can come from more than one source.</p><div class="hbars" id="gp-how"></div></div>
+      <div class="panel"><h2>Do citing papers stay on topic?</h2><p>Viruses (by genus) and proteins in the paper, against those in the grant. Citing papers only.</p><div id="gp-topic"></div></div>
+      <div class="panel wide"><h2>Years from award start to publication</h2><p>Citing papers only, by publication year minus award start year. Where RePORTER gives no start date, the first fiscal year in the grant pull stands in for it. Papers before the start (&lt;0) all come from RePORTER's publication list; most are one or two years early.</p><div class="chart" id="gp-lag"></div></div>
+      <div class="panel wide"><h2>Grants with the most linked papers</h2><div class="hbars" id="gp-top"></div></div>
+    </div>
+    <div class="panel">
+      <div class="tbl-head"><h2>Links</h2><input type="search" id="q-gp" placeholder="Search grant, paper title, PMID" aria-label="Search grant–paper links"></div>
+      <div id="t-gp"></div>
+    </div>
+  </section>
+
+  <!-- PATENTS x PAPERS -->
+  <section class="view" id="v-patents-papers" role="tabpanel" aria-label="Patents and papers" hidden>
+    <div class="view-head"><h2>Patents × Papers</h2><p>The literature patents cite. Citations that match a paper in the dataset are linked to it; the rest are kept as <b>outside literature</b>, which can include sources other than journal papers.</p></div>
+    <div class="tiles" id="pp-tiles"></div>
+    <div class="grid2">
+      <div class="panel wide"><h2>Age of cited literature at filing</h2><p>Patent filing year minus the cited work's publication year. All citations with a known year.</p><div class="chart" id="pp-age"></div></div>
+      <div class="panel wide"><h2>Patents citing the most literature</h2><div class="hbars" id="pp-top"></div></div>
+    </div>
+    <div class="panel">
+      <h2>Dataset papers cited by patents</h2>
+      <div id="t-pp-team"></div>
+    </div>
+    <div class="panel">
+      <div class="tbl-head"><h2>Outside literature</h2><input type="search" id="q-pp" placeholder="Search citation or patent" aria-label="Search outside literature"></div>
+      <div id="t-pp-ext"></div>
+    </div>
+  </section>
+
+  <!-- GRANTS x PATENTS -->
+  <section class="view" id="v-grants-patents" role="tabpanel" aria-label="Grants and patents" hidden>
+    <div class="view-head"><h2>Grants × Patents</h2><p>Which grants led to which patents.</p></div>
+    <div class="grid2">
+      <div class="panel">
+        <span class="status">Direct links not built yet</span>
+        <p>US patents from federally funded work carry a government-interest statement, such as “This invention was made with government support under AI066487 awarded by the NIH.” None of the current patent files include that statement. Once it is fetched for the 172 patents, the grant numbers in it can be matched against these grants, and this tab will show them.</p>
+      </div>
+      <div class="panel">
+        <h2>Indirect route: through a paper</h2>
+        <p>A grant's paper that a patent cites. This is a real path between documents but does not mean the grant funded the patent.</p>
+        <div class="tiles" id="gt-tiles" style="grid-template-columns:repeat(3,minmax(0,1fr))"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Grant → paper → patent</h2>
+      <div id="t-gt"></div>
+    </div>
+  </section>
+
+  <footer>
+    <div><b>Sources.</b> Grants: NIH RePORTER projects and publications (federal-biomedical-tech-datasets-script). Papers: the papers workstream's core set and PubMed records of grant-cited papers. Patents: USPTO Patent Public Search and Google Patents (patent_pipeline).</div>
+    <div><b>Grant years</b> are the project start and end dates. 106 grants have none in RePORTER, so their first and last fiscal year in the pull is used (marked “fiscal years” in the Grants table).</div>
+    <div><b>Viruses and proteins</b> come from each workstream's own keyword matching against the knowledge graph vocabulary (kg_keywords.csv), mapped onto one list here: Ebola viruses, Marburg viruses, the filovirus family named generally, and the nine filovirus proteins. Patent matches are candidates; some are flagged for review.</div>
+    <div id="built"></div>
+  </footer>
+</div>
+<div id="tip" hidden></div>
+
+<script>
+const D = /*__DATA__*/null;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const fmt = (n) => Math.round(n).toLocaleString("en-US");
+const money = (n) => n >= 1e9 ? `$${(n / 1e9).toFixed(n >= 1e10 ? 0 : 1)}B` : n >= 1e6 ? `$${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : `$${Math.round(n)}`;
+const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
+const G = D.grants, P = D.papers, T = D.patents;
+const GI = new Map(G.map((g, i) => [g, i])), PI_ = new Map(P.map((p, i) => [p, i])), TI = new Map(T.map((t, i) => [t, i]));
+const SHORT = ["Ebola", "Marburg", "Filovirus"];
+const entName = (i) => i < 3 ? SHORT[i] : D.ents[i][1];
+const PUBMED = 1, REPORTER = 2, PI = 4;
+const HOW = { vax: "Vaccine antigen class (CPC A61K39/12)", ab: "Antiviral antibody class (CPC C07K16/10)", both: "Both CPC classes", broad: "Broader abstract search, no CPC filter" };
+const TOPIC = { s: ["stay", "Stays on topic"], a: ["adds", "Adds a virus or protein"], n: ["none", "No overlap"], e: ["empty", "Names no virus or protein"] };
+
+// link indexes
+const gpByGrant = G.map(() => []), gpByPaper = P.map(() => []);
+D.gp.forEach((l, i) => { gpByGrant[l[0]].push(i); gpByPaper[l[1]].push(i); });
+const tpByPaper = P.map(() => []), tpByPatent = T.map(() => []), txByPatent = T.map(() => []);
+D.tp.forEach((l, i) => { tpByPaper[l[1]].push(i); tpByPatent[l[0]].push(i); });
+D.tx.forEach((l, i) => txByPatent[l[0]].push(i));
+
+const allYears = [...G.flatMap((g) => [g.y0, g.y1]), ...P.map((p) => p.y), ...T.map((t) => t.y)].filter(Boolean);
+const YMIN = Math.min(...allYears), YMAX = Math.max(...allYears);
+
+// ---------- filters ----------
+const F = { v: "", p: "", y0: YMIN, y1: YMAX };
+let ok = {};
+for (let i = 0; i < 3; i++) $("f-virus").insertAdjacentHTML("beforeend", `<option value="${i}">${esc(D.ents[i][1])}</option>`);
+for (let i = 3; i < D.ents.length; i++) $("f-protein").insertAdjacentHTML("beforeend", `<option value="${i}">${esc(D.ents[i][1])}</option>`);
+for (let y = YMIN; y <= YMAX; y++) { $("f-y0").insertAdjacentHTML("beforeend", `<option>${y}</option>`); $("f-y1").insertAdjacentHTML("beforeend", `<option>${y}</option>`); }
+$("f-y0").value = YMIN; $("f-y1").value = YMAX;
+
+const entOk = (n) => (F.v === "" || n.includes(+F.v)) && (F.p === "" || n.includes(+F.p));
+function applyFilters() {
+  const g = G.map((x) => entOk(x.n) && x.y0 <= F.y1 && (x.y1 ?? x.y0) >= F.y0);
+  const p = P.map((x) => entOk(x.n) && x.y >= F.y0 && x.y <= F.y1);
+  const t = T.map((x) => entOk(x.n) && x.y >= F.y0 && x.y <= F.y1);
+  ok = { g, p, t,
+    gp: D.gp.filter((l) => g[l[0]] && p[l[1]]),
+    tp: D.tp.filter((l) => t[l[0]] && p[l[1]]),
+    tx: D.tx.filter((l) => t[l[0]]),
+  };
+  const n = (a) => a.filter(Boolean).length;
+  const active = F.v !== "" || F.p !== "" || F.y0 !== YMIN || F.y1 !== YMAX;
+  $("scope").innerHTML = active
+    ? `Showing <b>${fmt(n(g))}</b> of ${fmt(G.length)} grants · <b>${fmt(n(p))}</b> of ${fmt(P.length)} papers · <b>${fmt(n(t))}</b> of ${fmt(T.length)} patents`
+    : `<b>${fmt(G.length)}</b> grants · <b>${fmt(P.length)}</b> papers · <b>${fmt(T.length)}</b> patents`;
+}
+const inRangeFunding = (g) => g.fy.reduce((s, [y, v]) => s + (y >= F.y0 && y <= F.y1 ? v : 0), 0);
+const idx = (mask) => mask.reduce((a, v, i) => (v && a.push(i), a), []);
+
+// ---------- components ----------
+function tiles(el, items) {
+  el.innerHTML = items.map(([l, v, s]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span>${s ? `<span class="s">${s}</span>` : ""}</div>`).join("");
+}
+function chips(n) {
+  return `<div class="chips">${n.map((i) => `<span class="chip${i < 3 ? " v" : ""}">${esc(entName(i))}</span>`).join("")}</div>`;
+}
+function niceTicks(max) {
+  if (max <= 0) return [0, 1];
+  const raw = max / 3, mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
+  const out = [];
+  for (let v = 0; v <= max + step * 0.999; v += step) out.push(+v.toPrecision(12));
+  return out;
+}
+// Column chart: bins [{x, v, tip?}], one series. Width follows the container.
+function colChart(el, bins, { color, yfmt = fmt, label = "", height = 170, xEvery } = {}) {
+  if (!bins.length || bins.every((b) => !b.v)) { el.innerHTML = `<div class="empty-chart">Nothing matches the filters.</div>`; return; }
+  const W = Math.max(260, el.clientWidth || 560), H = height, m = { l: 46, r: 6, t: 8, b: 22 };
+  const ticks = niceTicks(Math.max(...bins.map((b) => b.v)));
+  const top = ticks[ticks.length - 1];
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, slot = iw / bins.length;
+  const bw = Math.max(1, Math.min(24, slot - 2));
+  const y = (v) => m.t + ih - (v / top) * ih;
+  const every = xEvery || Math.max(1, Math.ceil(40 / slot));
+  let s = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="${esc(label)}">`;
+  for (const t of ticks) s += `<line class="${t ? "gl" : "axis"}" x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l - 6}" y="${y(t) + 4}" text-anchor="end">${esc(yfmt(t))}</text>`;
+  bins.forEach((b, i) => {
+    const cx = m.l + slot * i + slot / 2, x = cx - bw / 2, h = Math.max(0, (b.v / top) * ih), y0 = m.t + ih;
+    if (i % every === 0) s += `<text x="${cx}" y="${H - 6}" text-anchor="middle">${esc(b.x)}</text>`;
+    s += `<g class="col">`;
+    if (h > 0) {
+      const r = Math.min(4, bw / 2, h);
+      s += `<path class="mark" style="fill:${color}" d="M${x},${y0}V${y0 - h + r}Q${x},${y0 - h} ${x + r},${y0 - h}H${x + bw - r}Q${x + bw},${y0 - h} ${x + bw},${y0 - h + r}V${y0}Z"/>`;
+    }
+    s += `<rect class="hit" x="${m.l + slot * i}" y="${m.t}" width="${slot}" height="${ih}" tabindex="0" data-tv="${esc(b.tipv ?? yfmt(b.v))}" data-tl="${esc(b.tip ?? b.x)}"/></g>`;
+  });
+  s += `</svg>`;
+  const rows = bins.filter((b) => b.v).map((b) => `<tr><td>${esc(b.tip ?? b.x)}</td><td class="num">${esc(b.tipv ?? yfmt(b.v))}</td></tr>`).join("");
+  el.innerHTML = s + `<details class="tv"><summary>Show as table</summary><div class="tv-wrap"><table><tbody>${rows}</tbody></table></div></details>`;
+}
+// Horizontal bars: rows [{label, v, note, key}]. onPick makes rows buttons.
+function hbars(el, rows, { color, vfmt = fmt, empty = "Nothing matches the filters.", pressed } = {}) {
+  if (!rows.length) { el.innerHTML = `<div class="empty-chart">${empty}</div>`; return; }
+  const max = Math.max(...rows.map((r) => r.v), 1);
+  el.innerHTML = rows.map((r) => {
+    const tag = r.key != null ? "button" : "div";
+    const attrs = r.key != null ? ` type="button" data-key="${esc(r.key)}" aria-pressed="${pressed === r.key}"` : "";
+    return `<${tag} class="hb"${attrs}><span class="hb-label"><span>${esc(r.label)}</span><span class="v"><b>${esc(vfmt(r.v))}</b>${r.note ? ` · ${esc(r.note)}` : ""}</span></span>
+      <span class="hb-track"><span class="hb-fill" style="width:${(r.v / max) * 100}%;background:${color}"></span></span></${tag}>`;
+  }).join("");
+}
+function topN(counter, n) { return [...counter.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]))).slice(0, n); }
+function count(items, key) { const m = new Map(); for (const it of items) for (const k of [].concat(key(it))) if (k) m.set(k, (m.get(k) || 0) + 1); return m; }
+function segBar(el, parts, total) {
+  // parts: [{cls, label, v}]; a tall segmented bar with a legend.
+  if (!total) { el.innerHTML = `<div class="empty-chart">Nothing matches the filters.</div>`; return; }
+  el.innerHTML = `<div class="seg" role="img" aria-label="${esc(parts.map((p) => `${p.label}: ${p.v}`).join(", "))}">${parts.filter((p) => p.v).map((p) => {
+    const share = p.v / total, txt = `${pct(p.v, total)}%`;
+    return `<span class="${p.cls}${p.dark ? " dark-text" : ""}" style="flex:${p.v}" tabindex="0" data-tv="${fmt(p.v)} · ${txt}" data-tl="${esc(p.label)}">${share > 0.07 && !p.quiet ? txt : ""}</span>`;
+  }).join("")}</div>
+  <div class="legend">${parts.map((p) => `<span><i class="${p.cls}"></i>${esc(p.label)} (${fmt(p.v)})</span>`).join("")}</div>`;
+}
+
+// Tables: sortable, searchable, paged. cols: [{h, cell, sort, cls}]
+const TBL = {};
+function table(id, rows, cols, { q = "", text, sortDefault, page = 25, empty = "Nothing matches the filters." } = {}) {
+  const st = TBL[id] ||= { sort: sortDefault?.[0] ?? null, dir: sortDefault?.[1] ?? -1, shown: page };
+  let rs = q ? rows.filter((r) => text(r).toLowerCase().includes(q.toLowerCase())) : rows;
+  const c = cols.find((c) => c.k === st.sort);
+  if (c) rs = [...rs].sort((a, b) => { const x = c.sort(a), y = c.sort(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; });
+  const el = $(id);
+  if (!rs.length) { el.innerHTML = `<div class="table-wrap"><div class="none">${empty}</div></div>`; return; }
+  el.innerHTML = `<div class="table-wrap"><table class="data"><thead><tr>${cols.map((c) => `<th>${c.sort ? `<button type="button" data-sort="${c.k}" data-on="${st.sort === c.k ? 1 : 0}">${c.h}${st.sort === c.k ? (st.dir < 0 ? " ↓" : " ↑") : ""}</button>` : c.h}</th>`).join("")}</tr></thead>
+    <tbody>${rs.slice(0, st.shown).map((r) => `<tr>${cols.map((c) => `<td${c.cls ? ` class="${c.cls}"` : ""}>${c.cell(r)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+    ${rs.length > st.shown ? `<div class="more"><button type="button" class="btn" data-more="1">Show ${Math.min(page, rs.length - st.shown)} more (${fmt(rs.length - st.shown)} not shown)</button></div>` : `<div class="sub" style="padding-top:8px">${fmt(rs.length)} row${rs.length === 1 ? "" : "s"}</div>`}`;
+  el.onclick = (e) => {
+    const s = e.target.closest("[data-sort]");
+    if (s) { st.dir = st.sort === s.dataset.sort ? -st.dir : -1; st.sort = s.dataset.sort; render(); return; }
+    if (e.target.closest("[data-more]")) { st.shown += page; render(); }
+  };
+}
+const yearBins = (map, y0, y1) => { const out = []; for (let y = y0; y <= y1; y++) out.push({ x: String(y), v: map.get(y) || 0 }); return out; };
+const pmLink = (p) => `<a href="https://pubmed.ncbi.nlm.nih.gov/${esc(p.id)}/" target="_blank" rel="noopener">${esc(p.t)}</a>`;
+const grLink = (g) => g.u ? `<a href="${esc(g.u)}" target="_blank" rel="noopener">${esc(g.c)}</a>` : esc(g.c);
+const ptLink = (t) => `<a href="${esc(t.u)}" target="_blank" rel="noopener">${esc(t.id)}</a>`;
+
+// ---------- views ----------
+function viewOverview() {
+  const gi = idx(ok.g), pi = idx(ok.p), ti = idx(ok.t);
+  const fund = gi.reduce((s, i) => s + inRangeFunding(G[i]), 0);
+  const core = pi.filter((i) => P[i].core).length, granted = ti.filter((i) => T[i].g).length;
+  tiles($("ov-tiles"), [
+    ["Grants", fmt(gi.length), `${money(fund)} awarded`],
+    ["Papers", fmt(pi.length), `${fmt(core)} in the core set`],
+    ["Patents", fmt(ti.length), `${fmt(granted)} granted, ${fmt(ti.length - granted)} applications; ${fmt(new Set(ti.map((i) => T[i].fam)).size)} inventions`],
+    ["Links between them", fmt(ok.gp.length + ok.tp.length + ok.tx.length), "grant–paper and patent–literature"],
+  ]);
+
+  // connection map
+  const bridge = bridges().length;
+  const node = (x, y, cls, name, n, href) => `<a href="#${href}" aria-label="${name}: ${n}"><circle cx="${x}" cy="${y}" r="50" style="fill:color-mix(in srgb, var(${cls}) 14%, var(--surface));stroke:var(${cls});stroke-width:2"/>
+    <text class="nname" x="${x}" y="${y - 2}" text-anchor="middle">${name}</text><text class="ncount" x="${x}" y="${y + 17}" text-anchor="middle">${n}</text></a>`;
+  const edge = (x, y, w, lines, href, label) => `<a href="#${href}" aria-label="${esc(label)}"><rect class="ebox" x="${x - w / 2}" y="${y - 10 - (lines.length - 1) * 8}" width="${w}" height="${20 + (lines.length - 1) * 16}" rx="5"/>
+    ${lines.map((l, i) => `<text class="elabel" x="${x}" y="${y + 4 - (lines.length - 1) * 8 + i * 16}" text-anchor="middle">${l}</text>`).join("")}</a>`;
+  $("ov-map").innerHTML = `<svg viewBox="0 0 520 330" role="img" aria-label="Grants, papers and patents and the links between them">
+    <line x1="110" y1="80" x2="410" y2="80" style="stroke:var(--fg);stroke-width:2"/>
+    <line x1="410" y1="80" x2="260" y2="260" style="stroke:var(--fg);stroke-width:2"/>
+    <line x1="110" y1="80" x2="260" y2="260" style="stroke:var(--muted);stroke-width:1.5;stroke-dasharray:5 5"/>
+    ${edge(260, 80, 150, [`${fmt(ok.gp.length)} links`], "grants-papers", `${ok.gp.length} grant–paper links`)}
+    ${edge(352, 172, 156, [`${fmt(ok.tp.length)} dataset papers`, `${fmt(ok.tx.length)} outside works`], "patents-papers", `${ok.tp.length} dataset papers and ${ok.tx.length} outside works cited by patents`)}
+    ${edge(168, 172, 140, ["not linked yet", `${bridge} paths via a paper`], "grants-patents", `Grant–patent links not built yet; ${bridge} indirect via a paper`)}
+    ${node(110, 80, "--c-grant", "Grants", fmt(gi.length), "grants")}
+    ${node(410, 80, "--c-paper", "Papers", fmt(pi.length), "papers")}
+    ${node(260, 260, "--c-patent", "Patents", fmt(ti.length), "patents")}
+  </svg>`;
+
+  // over time, one shared year axis
+  const lo = F.y0, hi = F.y1, opts = { height: 110 };
+  const gy = new Map(); for (const i of gi) for (const [y] of G[i].fy) if (y >= lo && y <= hi) gy.set(y, (gy.get(y) || 0) + 1);
+  colChart($("ov-t-grants"), yearBins(gy, lo, hi).map((b) => ({ ...b, tip: `Fiscal year ${b.x}`, tipv: `${fmt(b.v)} grants` })), { ...opts, color: "var(--c-grant)", label: "Grants funded per fiscal year" });
+  colChart($("ov-t-papers"), yearBins(count(pi.map((i) => P[i]), (p) => p.y), lo, hi).map((b) => ({ ...b, tip: b.x, tipv: `${fmt(b.v)} papers` })), { ...opts, color: "var(--c-paper)", label: "Papers per year" });
+  colChart($("ov-t-patents"), yearBins(count(ti.map((i) => T[i]), (t) => t.y), lo, hi).map((b) => ({ ...b, tip: b.x, tipv: `${fmt(b.v)} patents filed` })), { ...opts, color: "var(--c-patent)", label: "Patents filed per year" });
+
+  // entity matrix: year filter only
+  const yg = G.filter((x) => x.y0 <= F.y1 && (x.y1 ?? x.y0) >= F.y0), yp = P.filter((x) => x.y >= F.y0 && x.y <= F.y1), yt = T.filter((x) => x.y >= F.y0 && x.y <= F.y1);
+  const cell = (set, i, cls) => { const n = set.filter((d) => d.n.includes(i)).length, s = set.length ? n / set.length : 0;
+    return `<td><div class="mcell"><span class="mtrack"><span class="mfill" style="width:${s * 100}%;background:var(${cls})"></span></span><span class="mval"><b>${pct(n, set.length)}%</b> · ${fmt(n)}</span></div></td>`; };
+  $("ov-matrix").innerHTML = `<thead><tr><th>Names</th><th><i class="dotk dk-grant"></i> Grants (${fmt(yg.length)})</th><th><i class="dotk dk-paper"></i> Papers (${fmt(yp.length)})</th><th><i class="dotk dk-patent"></i> Patents (${fmt(yt.length)})</th></tr></thead><tbody>${
+    D.ents.map(([kind, name], i) => `<tr><td class="ent"><span class="kind">${kind}</span><button type="button" data-ent="${i}">${esc(name)}</button></td>${cell(yg, i, "--c-grant")}${cell(yp, i, "--c-paper")}${cell(yt, i, "--c-patent")}</tr>`).join("")}</tbody>`;
+}
+
+function viewGrants() {
+  const gs = idx(ok.g).map((i) => G[i]);
+  const fundOf = new Map(gs.map((g) => [g, inRangeFunding(g)]));
+  const total = [...fundOf.values()].reduce((a, b) => a + b, 0);
+  const withPapers = gs.filter((g) => gpByGrant[GI.get(g)].some((li) => ok.p[D.gp[li][1]])).length;
+  tiles($("gr-tiles"), [
+    ["Grants", fmt(gs.length), `${fmt(gs.filter((g) => g.r === "strong").length)} strongly on topic`],
+    ["Funding", money(total), F.y0 !== YMIN || F.y1 !== YMAX ? `fiscal years ${F.y0}–${F.y1}` : "all fiscal years"],
+    ["Institutes", fmt(new Set(gs.map((g) => g.ic)).size), `${fmt(new Set(gs.map((g) => g.o).filter(Boolean)).size)} organizations`],
+    ["With a linked paper", fmt(withPapers), `${pct(withPapers, gs.length)}% of these grants`],
+  ]);
+  const fy = new Map(); for (const g of gs) for (const [y, v] of g.fy) if (y >= F.y0 && y <= F.y1) fy.set(y, (fy.get(y) || 0) + v);
+  const ys = [...fy.keys()];
+  colChart($("gr-fund"), ys.length ? yearBins(fy, Math.min(...ys), Math.max(...ys)).map((b) => ({ ...b, tip: `Fiscal year ${b.x}`, tipv: money(b.v) })) : [], { color: "var(--c-grant)", yfmt: money, label: "Funding by fiscal year", height: 200 });
+  const ic = new Map(), icN = new Map(); for (const g of gs) { ic.set(g.ic, (ic.get(g.ic) || 0) + fundOf.get(g)); icN.set(g.ic, (icN.get(g.ic) || 0) + 1); }
+  hbars($("gr-ic"), topN(ic, 8).map(([k, v]) => ({ label: k, v, note: `${icN.get(k)} grants` })), { color: "var(--c-grant)", vfmt: money });
+  hbars($("gr-act"), topN(count(gs, (g) => g.a), 8).map(([k, v]) => ({ label: k, v })), { color: "var(--c-grant)" });
+  hbars($("gr-org"), topN(count(gs, (g) => g.o), 10).map(([k, v]) => ({ label: k, v })), { color: "var(--c-grant)" });
+  const nPapers = (g) => gpByGrant[GI.get(g)].filter((li) => ok.p[D.gp[li][1]]).length;
+  table("t-grants", gs, [
+    { k: "num", h: "Grant", cell: (g) => `${grLink(g)}<div class="sub">${esc(g.a)} · ${esc(g.ic)}</div>`, sort: (g) => g.c },
+    { k: "title", h: "Title", cell: (g) => `${esc(g.t)}<div class="sub">${esc(g.pi)} · ${esc(g.o)}</div>` },
+    { k: "years", h: "Years", cls: "num", cell: (g) => `${g.y0 ?? "?"}–${g.y1 ?? "?"}${g.sd ? "" : `<div class="sub">fiscal years</div>`}`, sort: (g) => g.y0 ?? 0 },
+    { k: "fund", h: "Funding", cls: "num", cell: (g) => money(fundOf.get(g)), sort: (g) => fundOf.get(g) },
+    { k: "papers", h: "Papers", cls: "num", cell: (g) => fmt(nPapers(g)), sort: nPapers },
+    { k: "ents", h: "Names", cell: (g) => chips(g.n) },
+  ], { q: $("q-grants").value, text: (g) => `${g.c} ${g.k} ${g.t} ${g.pi} ${g.o} ${g.ic}`, sortDefault: ["fund", -1] });
+}
+
+function viewPapers() {
+  const set = $("f-pset").value;
+  const ps = idx(ok.p).map((i) => P[i]).filter((p) => set === "all" || (set === "core" ? p.core : gpByPaper[PI_.get(p)].length));
+  const pi = PI_;
+  const core = ps.filter((p) => p.core).length, viaGrant = ps.filter((p) => gpByPaper[pi.get(p)].length).length;
+  tiles($("pa-tiles"), [
+    ["Papers", fmt(ps.length), `${ps.length ? Math.min(...ps.map((p) => p.y)) : "–"}–${ps.length ? Math.max(...ps.map((p) => p.y)) : "–"}`],
+    ["Core set", fmt(core), "from the papers workstream"],
+    ["Linked to a grant", fmt(viaGrant), `${pct(viaGrant, ps.length)}% of these papers`],
+    ["Journals", fmt(new Set(ps.map((p) => p.j).filter(Boolean)).size), ""],
+  ]);
+  const yc = count(ps, (p) => p.y), ys = [...yc.keys()];
+  colChart($("pa-year"), ys.length ? yearBins(yc, Math.min(...ys), Math.max(...ys)).map((b) => ({ ...b, tipv: `${fmt(b.v)} papers` })) : [], { color: "var(--c-paper)", label: "Papers by publication year", height: 200 });
+  hbars($("pa-jour"), topN(count(ps, (p) => p.j), 10).map(([k, v]) => ({ label: k, v })), { color: "var(--c-paper)" });
+  hbars($("pa-src"), topN(count(ps.filter((p) => p.core), (p) => (p.src || "").split(/[;|,]/).map((s) => s.trim())), 8).map(([k, v]) => ({ label: k, v })), { color: "var(--c-paper)", empty: "No core-set papers match the filters." });
+  const nG = (p) => gpByPaper[pi.get(p)].filter((li) => ok.g[D.gp[li][0]]).length;
+  const nT = (p) => tpByPaper[pi.get(p)].length;
+  table("t-papers", ps, [
+    { k: "date", h: "Published", cls: "num", cell: (p) => esc(p.d), sort: (p) => p.d },
+    { k: "title", h: "Paper", cell: (p) => `${pmLink(p)}<div class="sub">${esc(p.j)} · PMID ${esc(p.id)}</div>` },
+    { k: "set", h: "Set", cell: (p) => p.core ? `<span class="pill">Core set</span>` : `<span class="pill">Through a grant</span>`, sort: (p) => p.core },
+    { k: "grants", h: "Grants", cls: "num", cell: (p) => fmt(nG(p)), sort: nG },
+    { k: "patents", h: "Cited by patents", cls: "num", cell: (p) => fmt(nT(p)), sort: nT },
+    { k: "ents", h: "Names", cell: (p) => chips(p.n) },
+  ], { q: $("q-papers").value, text: (p) => `${p.t} ${p.j} ${p.id}`, sortDefault: ["date", -1] });
+}
+
+function viewPatents() {
+  const ts = idx(ok.t).map((i) => T[i]);
+  const ti = TI;
+  const granted = ts.filter((t) => t.g).length, cites = ts.filter((t) => tpByPatent[ti.get(t)].length + txByPatent[ti.get(t)].length).length;
+  tiles($("pt-tiles"), [
+    ["Patents", fmt(ts.length), `${fmt(new Set(ts.map((t) => t.fam)).size)} distinct inventions (patent families)`],
+    ["Granted", fmt(granted), `${fmt(ts.length - granted)} published applications`],
+    ["With an assignee", fmt(ts.filter((t) => t.asg).length), "the rest list none"],
+    ["Citing literature", fmt(cites), `${pct(cites, ts.length)}% of these patents`],
+  ]);
+  const yc = count(ts, (t) => t.y), ys = [...yc.keys()];
+  colChart($("pt-year"), ys.length ? yearBins(yc, Math.min(...ys), Math.max(...ys)).map((b) => ({ ...b, tipv: `${fmt(b.v)} patents filed` })) : [], { color: "var(--c-patent)", label: "Patents by filing year", height: 200 });
+  hbars($("pt-how"), ["vax", "ab", "both", "broad"].map((k) => ({ label: HOW[k], v: ts.filter((t) => t.how === k).length })).filter((r) => r.v), { color: "var(--c-patent)" });
+  const valid = ts.reduce((s, t) => s + t.rv[0], 0), review = ts.reduce((s, t) => s + t.rv[1], 0);
+  segBar($("pt-review"), [{ cls: "k-stay", label: "Likely valid", v: valid }, { cls: "k-empty", label: "Needs review", v: review, quiet: true }], valid + review);
+  hbars($("pt-asg"), topN(count(ts, (t) => t.asg), 8).map(([k, v]) => ({ label: k, v })), { color: "var(--c-patent)", empty: "No patents with an assignee match the filters." });
+  hbars($("pt-inv"), topN(count(ts, (t) => t.inv.replace(" et al.", "")), 10).filter(([, v]) => v > 1).map(([k, v]) => ({ label: k, v })), { color: "var(--c-patent)", empty: "No inventor has more than one patent here." });
+  const nLit = (t) => tpByPatent[ti.get(t)].length + txByPatent[ti.get(t)].length;
+  table("t-patents", ts, [
+    { k: "filed", h: "Filed", cls: "num", cell: (t) => esc(t.f), sort: (t) => t.f },
+    { k: "num", h: "Patent", cell: (t) => `${ptLink(t)}<div class="sub">${t.g ? "Granted" : "Application"}</div>`, sort: (t) => t.id },
+    { k: "title", h: "Title", cell: (t) => `${esc(t.t)}<div class="sub">${esc([t.asg, t.inv].filter(Boolean).join(" · "))}</div>` },
+    { k: "how", h: "Found by", cell: (t) => `<span class="sub">${esc(HOW[t.how])}</span>` , sort: (t) => t.how },
+    { k: "lit", h: "Literature cited", cls: "num", cell: (t) => fmt(nLit(t)), sort: nLit },
+    { k: "ents", h: "Names", cell: (t) => chips(t.n) },
+  ], { q: $("q-patents").value, text: (t) => `${t.id} ${t.t} ${t.asg} ${t.inv}`, sortDefault: ["filed", -1] });
+}
+
+function viewGrantsPapers() {
+  const L = ok.gp, cited = L.filter((l) => l[2] & (PUBMED | REPORTER));
+  tiles($("gp-tiles"), [
+    ["Links", fmt(L.length), `${fmt(cited.length)} citations`],
+    ["Grants with a paper", fmt(new Set(L.map((l) => l[0])).size), ""],
+    ["Papers with a grant", fmt(new Set(L.map((l) => l[1])).size), ""],
+    ["PI-written, not cited", fmt(L.length - cited.length), "on the grant's topic"],
+  ]);
+  hbars($("gp-how"), [
+    { label: "RePORTER lists the paper under the grant", v: L.filter((l) => l[2] & REPORTER).length },
+    { label: "The paper's PubMed record lists the grant", v: L.filter((l) => l[2] & PUBMED).length },
+    { label: "A grant PI wrote it after the award started", v: L.filter((l) => l[2] & PI).length },
+  ], { color: "var(--accent)" });
+  segBar($("gp-topic"), ["s", "a", "n", "e"].map((k) => ({ cls: `k-${TOPIC[k][0]}`, label: TOPIC[k][1], v: cited.filter((l) => l[3] === k).length, dark: k === "a", quiet: k === "e" })), cited.length);
+  const lag = new Map(); for (const l of cited) { const g = G[l[0]], p = P[l[1]]; if (g.y0 && p.y) { const d = Math.max(-1, Math.min(15, p.y - g.y0)); lag.set(d, (lag.get(d) || 0) + 1); } }
+  const lagBins = []; for (let d = -1; d <= 15; d++) lagBins.push({ x: d === -1 ? "<0" : d === 15 ? "15+" : String(d), v: lag.get(d) || 0, tip: d === -1 ? "Before award start" : d === 15 ? "15 or more years after start" : `${d} year${d === 1 ? "" : "s"} after start`, tipv: `${fmt(lag.get(d) || 0)} papers` });
+  colChart($("gp-lag"), lagBins, { color: "var(--accent)", label: "Years from award start to publication", xEvery: 1 });
+  const byG = count(L, (l) => l[0]);
+  hbars($("gp-top"), topN(byG, 10).map(([g, v]) => ({ label: `${G[g].c} · ${G[g].t}`, v })), { color: "var(--c-grant)" });
+  const linkPills = (r) => [r & REPORTER && "RePORTER", r & PUBMED && "PubMed", r & PI && "PI-written"].filter(Boolean).map((s) => `<span class="pill">${s}</span>`).join("");
+  table("t-gp", L, [
+    { k: "grant", h: "Grant", cell: (l) => `${grLink(G[l[0]])}<div class="sub">${esc(G[l[0]].t)}</div>`, sort: (l) => G[l[0]].c },
+    { k: "paper", h: "Paper", cell: (l) => `${pmLink(P[l[1]])}<div class="sub">${esc(P[l[1]].j)}</div>` },
+    { k: "year", h: "Year", cls: "num", cell: (l) => P[l[1]].y, sort: (l) => P[l[1]].y },
+    { k: "how", h: "Linked by", cell: (l) => linkPills(l[2]) },
+    { k: "topic", h: "Topic", cell: (l) => l[3] ? `<span class="pill"><i class="k-${TOPIC[l[3]][0]}"></i>${TOPIC[l[3]][1]}</span>` : `<span class="sub">not compared</span>`, sort: (l) => l[3] },
+  ], { q: $("q-gp").value, text: (l) => `${G[l[0]].c} ${G[l[0]].t} ${P[l[1]].t} ${P[l[1]].id}`, sortDefault: ["year", -1] });
+}
+
+function viewPatentsPapers() {
+  const tp = ok.tp, tx = ok.tx;
+  const pats = new Set([...tp.map((l) => l[0]), ...tx.map((l) => l[0])]);
+  const ages = [...tp.map((l) => T[l[0]].y - P[l[1]].y), ...tx.filter((l) => l[2]).map((l) => T[l[0]].y - l[2])].sort((a, b) => a - b);
+  const mid = Math.floor(ages.length / 2);
+  const median = !ages.length ? null : ages.length % 2 ? ages[mid] : (ages[mid - 1] + ages[mid]) / 2;
+  tiles($("pp-tiles"), [
+    ["Patents citing literature", fmt(pats.size), ""],
+    ["Citations", fmt(tp.length + tx.length), `${fmt(tp.length)} to dataset papers`],
+    ["Dataset papers cited", fmt(new Set(tp.map((l) => l[1])).size), "all from the core set"],
+    ["Median age at filing", median == null ? "–" : `${median} yr`, "filing year − publication year"],
+  ]);
+  const ac = new Map(); for (const a of ages) { const b = Math.max(-1, Math.min(25, a)); ac.set(b, (ac.get(b) || 0) + 1); }
+  const bins = []; for (let a = -1; a <= 25; a++) bins.push({ x: a === -1 ? "<0" : a === 25 ? "25+" : String(a), v: ac.get(a) || 0, tip: a === -1 ? "Published after the filing date" : a === 25 ? "25 or more years old" : `${a} year${a === 1 ? "" : "s"} old`, tipv: `${fmt(ac.get(a) || 0)} citations` });
+  colChart($("pp-age"), bins, { color: "var(--c-patent)", label: "Age of cited literature at filing" });
+  const byT = new Map(); for (const l of [...tp, ...tx]) byT.set(l[0], (byT.get(l[0]) || 0) + 1);
+  hbars($("pp-top"), topN(byT, 10).map(([t, v]) => ({ label: `${T[t].id} · ${T[t].t}`, v, note: `filed ${T[t].y}` })), { color: "var(--c-patent)" });
+  table("t-pp-team", tp, [
+    { k: "pat", h: "Patent", cell: (l) => `${ptLink(T[l[0]])}<div class="sub">${esc(T[l[0]].t)}</div>`, sort: (l) => T[l[0]].id },
+    { k: "paper", h: "Cites paper", cell: (l) => `${pmLink(P[l[1]])}<div class="sub">${esc(P[l[1]].j)} · ${P[l[1]].y}</div>` },
+    { k: "grants", h: "Paper's grants", cls: "num", cell: (l) => fmt(gpByPaper[l[1]].length), sort: (l) => gpByPaper[l[1]].length },
+    { k: "match", h: "Match", cell: (l) => `<span class="pill">${esc(l[2])}</span>` },
+  ], { empty: "No dataset papers are cited by patents that match the filters.", sortDefault: ["pat", 1] });
+  table("t-pp-ext", tx, [
+    { k: "pat", h: "Patent", cell: (l) => `${ptLink(T[l[0]])}<div class="sub">filed ${T[l[0]].y}</div>`, sort: (l) => T[l[0]].id },
+    { k: "cite", h: "Cited work", cell: (l) => esc(l[1]) },
+    { k: "year", h: "Year", cls: "num", cell: (l) => l[2] ?? "–", sort: (l) => l[2] ?? 0 },
+  ], { q: $("q-pp").value, text: (l) => `${T[l[0]].id} ${T[l[0]].t} ${l[1]}`, sortDefault: ["year", -1] });
+}
+
+function bridges() {
+  // grant -> paper (any link) <- patent, all three ends passing the filters
+  const out = [];
+  for (const [t, p] of ok.tp) for (const li of gpByPaper[p]) { const l = D.gp[li]; if (ok.g[l[0]]) out.push([l[0], p, t, l[2]]); }
+  return out;
+}
+function viewGrantsPatents() {
+  const B = bridges();
+  tiles($("gt-tiles"), [
+    ["Grants", fmt(new Set(B.map((b) => b[0])).size), ""],
+    ["Papers", fmt(new Set(B.map((b) => b[1])).size), ""],
+    ["Patents", fmt(new Set(B.map((b) => b[2])).size), ""],
+  ]);
+  table("t-gt", B, [
+    { k: "grant", h: "Grant", cell: (b) => `${grLink(G[b[0]])}<div class="sub">${esc(G[b[0]].t)}</div>`, sort: (b) => G[b[0]].c },
+    { k: "paper", h: "Paper", cell: (b) => `${pmLink(P[b[1]])}<div class="sub">${P[b[1]].y} · ${b[3] & (PUBMED | REPORTER) ? "cites the grant" : "written by a grant PI"}</div>` },
+    { k: "patent", h: "Cited by patent", cell: (b) => `${ptLink(T[b[2]])}<div class="sub">${esc(T[b[2]].t)} · filed ${T[b[2]].y}</div>`, sort: (b) => T[b[2]].y },
+  ], { empty: "No grant → paper → patent paths match the filters.", sortDefault: ["patent", -1] });
+}
+
+// ---------- routing + events ----------
+const VIEWS = { overview: viewOverview, grants: viewGrants, papers: viewPapers, patents: viewPatents, "grants-papers": viewGrantsPapers, "patents-papers": viewPatentsPapers, "grants-patents": viewGrantsPatents };
+let current = "overview";
+function route() {
+  const h = location.hash.slice(1);
+  current = VIEWS[h] ? h : "overview";
+  for (const v of Object.keys(VIEWS)) $("v-" + v).hidden = v !== current;
+  for (const a of document.querySelectorAll(".tab")) a.setAttribute("aria-selected", a.dataset.view === current);
+  render();
+}
+function render() { VIEWS[current](); }
+function onFilter() {
+  F.v = $("f-virus").value; F.p = $("f-protein").value;
+  let a = +$("f-y0").value, b = +$("f-y1").value; if (a > b) [a, b] = [b, a];
+  F.y0 = a; F.y1 = b;
+  for (const k in TBL) TBL[k].shown = 25;
+  applyFilters(); render();
+}
+for (const id of ["f-virus", "f-protein", "f-y0", "f-y1"]) $(id).addEventListener("change", onFilter);
+$("f-pset").addEventListener("change", () => { TBL["t-papers"] && (TBL["t-papers"].shown = 25); render(); });
+$("reset").addEventListener("click", () => { $("f-virus").value = ""; $("f-protein").value = ""; $("f-y0").value = YMIN; $("f-y1").value = YMAX; onFilter(); });
+for (const [q, t] of [["q-grants", "t-grants"], ["q-papers", "t-papers"], ["q-patents", "t-patents"], ["q-gp", "t-gp"], ["q-pp", "t-pp-ext"]]) {
+  $(q).addEventListener("input", () => { if (TBL[t]) TBL[t].shown = 25; render(); });
+}
+$("ov-matrix").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-ent]"); if (!b) return;
+  const i = +b.dataset.ent;
+  if (i < 3) $("f-virus").value = $("f-virus").value === String(i) ? "" : i; else $("f-protein").value = $("f-protein").value === String(i) ? "" : i;
+  onFilter();
+});
+window.addEventListener("hashchange", route);
+let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(render, 150); });
+
+// tooltip: value first, label second; text only
+const tip = $("tip");
+function showTip(el, x, y) {
+  tip.replaceChildren();
+  const b = document.createElement("b"); b.textContent = el.dataset.tv;
+  const s = document.createElement("span"); s.textContent = el.dataset.tl;
+  tip.append(b, s); tip.hidden = false;
+  const r = tip.getBoundingClientRect();
+  tip.style.left = Math.min(window.innerWidth - r.width - 8, Math.max(8, x + 12)) + "px";
+  tip.style.top = Math.max(8, y - r.height - 10) + "px";
+}
+document.addEventListener("pointermove", (e) => { const el = e.target.closest?.("[data-tv]"); el ? showTip(el, e.clientX, e.clientY) : (tip.hidden = true); });
+document.addEventListener("focusin", (e) => { const el = e.target.closest?.("[data-tv]"); if (el) { const r = el.getBoundingClientRect(); showTip(el, r.left + r.width / 2, r.top); } else tip.hidden = true; });
+document.addEventListener("focusout", () => { tip.hidden = true; });
+
+$("built").innerHTML = `Built ${esc(D.built)} by <b>dashboard/build_dashboard.py</b> from the workstreams' CSV outputs. Rerun it after any of them changes.`;
+applyFilters();
+route();
+</script>
