@@ -9,7 +9,7 @@ __pycache__/
 .claude/
 
 # Source data is downloaded or shared separately, never versioned (see README).
-data/
+data/**
 *.csv
 
 # Team planning documents and the SerenQA paper.
@@ -17,3 +17,23 @@ overview/
 
 # Someone else's RDF export work-in-progress; not part of the pipeline.
 exports/
+
+# Exception: the inputs dashboard/build_dashboard.py reads, so teammates can build
+# the dashboard from a fresh clone. `data/` became `data/**` above because git
+# cannot re-include a file inside an ignored folder.
+!data/**/
+!data/kg_keywords.csv
+!data/grants/cited_publications.csv
+!data/grants/grant_entity_edges.csv
+!data/grants/grant_paper_divergence.csv
+!data/grants/grant_publications.csv
+!data/papers/paper_citations.csv
+!data/papers/paper_dates.csv
+!data/papers/paper_grants.csv
+!data/papers/publication_metadata.csv
+!data/papers/papers_iedb_rcsb_update/output_v2/unique_papers_v2.csv
+!data/patents/patent_cited_publications.csv
+!data/patents/patent_details.csv
+!data/patents/patent_evidence_expanded.csv
+!data/patents/patent_external_literature_edges.csv
+!data/patents/patent_team_paper_edges.csv
