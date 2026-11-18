@@ -239,6 +239,7 @@ footer b { color: var(--fg); font-weight: 500; }
         <h2>How the collections connect</h2>
         <p>Lines are links between documents. Select one to open that view.</p>
         <div class="map" id="ov-map"></div>
+        <p class="note" id="ov-within"></p>
       </div>
       <div class="panel">
         <h2>Over time</h2>
@@ -273,10 +274,10 @@ footer b { color: var(--fg); font-weight: 500; }
 
   <!-- PAPERS -->
   <section class="view" id="v-papers" role="tabpanel" aria-label="Papers" hidden>
-    <div class="view-head"><h2>Papers</h2><p>Two sources: the <b>core set</b> of 240 filovirus papers from the papers workstream, and filovirus papers that NIH RePORTER or PubMed tie to one of the grants. A paper counts as filovirus when a filovirus name is in its title or MeSH headings, or twice in its abstract.</p></div>
+    <div class="view-head"><h2>Papers</h2><p>Three sources: the <b>core set</b> of 300 papers that the papers workstream found through BV-BRC, LANL HFV, IEDB and RCSB PDB; the filovirus papers NIH RePORTER lists under one of the grants (a filovirus name in the title or MeSH headings, or twice in the abstract); and every paper a patent cites that resolved to a PubMed record, on topic or not.</p></div>
     <div class="filters" style="border-top-width:1px" role="group" aria-label="Paper set">
       <label class="field">Paper set
-        <select id="f-pset"><option value="all">All papers</option><option value="core">Core set</option><option value="grant">Found through grants</option></select>
+        <select id="f-pset"><option value="all">All papers</option><option value="1">Core set</option><option value="2">Cited by a grant</option><option value="3">Cited by a patent</option></select>
       </label>
     </div>
     <div class="tiles" id="pa-tiles"></div>
@@ -284,6 +285,7 @@ footer b { color: var(--fg); font-weight: 500; }
       <div class="panel wide"><h2>Papers by publication year</h2><div class="chart" id="pa-year"></div></div>
       <div class="panel"><h2>Journals</h2><p>Most frequent journals.</p><div class="hbars" id="pa-jour"></div></div>
       <div class="panel"><h2>Where the core set came from</h2><p>Database that referenced each core-set paper. A paper can come from several.</p><div class="hbars" id="pa-src"></div></div>
+      <div class="panel wide"><h2>Most cited by the other papers here</h2><p>From each paper's PubMed reference list. Only citations where both papers are in the set (and pass the filters) count.</p><div class="hbars" id="pa-cited"></div></div>
     </div>
     <div class="panel">
       <div class="tbl-head"><h2>Papers</h2><input type="search" id="q-papers" placeholder="Search title, journal, PMID" aria-label="Search papers"></div>
@@ -301,6 +303,7 @@ footer b { color: var(--fg); font-weight: 500; }
       <div class="panel"><h2>Virus and protein links</h2><p>Keyword matches in the patent's title or abstract, from the patent pipeline's review script. Generic protein words and abstract-only matches are flagged for review.</p><div id="pt-review"></div></div>
       <div class="panel"><h2>Assignees</h2><p>Most patents in the set list no assignee.</p><div class="hbars" id="pt-asg"></div></div>
       <div class="panel"><h2>First-named inventors</h2><p>Inventors with more than one patent. Only the first-named inventor is recorded.</p><div class="hbars" id="pt-inv"></div></div>
+      <div class="panel wide"><h2>Most cited by the other patents here</h2><p>From Google Patents' citation tables, read from both ends. Only citations where both patents are in the set count.</p><div class="hbars" id="pt-cited"></div></div>
     </div>
     <div class="panel">
       <div class="tbl-head"><h2>Patents</h2><input type="search" id="q-patents" placeholder="Search number, title, assignee, inventor" aria-label="Search patents"></div>
@@ -314,7 +317,7 @@ footer b { color: var(--fg); font-weight: 500; }
     <div class="tiles" id="gp-tiles"></div>
     <div class="grid2">
       <div class="panel"><h2>How the links were found</h2><p>A link can come from more than one source.</p><div class="hbars" id="gp-how"></div></div>
-      <div class="panel"><h2>Do citing papers stay on topic?</h2><p>Viruses (by genus) and proteins in the paper, against those in the grant. Citing papers only.</p><div id="gp-topic"></div></div>
+      <div class="panel"><h2>Do citing papers stay on topic?</h2><p>Viruses (by genus) and proteins in the paper, against those in the grant. Citing papers only. <span id="gp-topic-note"></span></p><div id="gp-topic"></div></div>
       <div class="panel wide"><h2>Years from award start to publication</h2><p>Citing papers only, by publication year minus award start year. Where RePORTER gives no start date, the first fiscal year in the grant pull stands in for it. Papers before the start (&lt;0) all come from RePORTER's publication list; most are one or two years early.</p><div class="chart" id="gp-lag"></div></div>
       <div class="panel wide"><h2>Grants with the most linked papers</h2><div class="hbars" id="gp-top"></div></div>
     </div>
@@ -326,14 +329,14 @@ footer b { color: var(--fg); font-weight: 500; }
 
   <!-- PATENTS x PAPERS -->
   <section class="view" id="v-patents-papers" role="tabpanel" aria-label="Patents and papers" hidden>
-    <div class="view-head"><h2>Patents × Papers</h2><p>The literature patents cite. Citations that match a paper in the dataset are linked to it; the rest are kept as <b>outside literature</b>, which can include sources other than journal papers.</p></div>
+    <div class="view-head"><h2>Patents × Papers</h2><p>The literature patents cite. A citation is linked to a paper when the patent pipeline matched it to the core set or it resolved to a PubMed record (those papers are in the Papers tab as “cited by a patent”). The rest are kept as <b>outside literature</b>, which can include sources other than journal papers.</p></div>
     <div class="tiles" id="pp-tiles"></div>
     <div class="grid2">
       <div class="panel wide"><h2>Age of cited literature at filing</h2><p>Patent filing year minus the cited work's publication year. All citations with a known year.</p><div class="chart" id="pp-age"></div></div>
       <div class="panel wide"><h2>Patents citing the most literature</h2><div class="hbars" id="pp-top"></div></div>
     </div>
     <div class="panel">
-      <h2>Dataset papers cited by patents</h2>
+      <div class="tbl-head"><h2>Papers cited by patents</h2><input type="search" id="q-pp-team" placeholder="Search patent, paper title, PMID" aria-label="Search papers cited by patents"></div>
       <div id="t-pp-team"></div>
     </div>
     <div class="panel">
@@ -344,26 +347,31 @@ footer b { color: var(--fg); font-weight: 500; }
 
   <!-- GRANTS x PATENTS -->
   <section class="view" id="v-grants-patents" role="tabpanel" aria-label="Grants and patents" hidden>
-    <div class="view-head"><h2>Grants × Patents</h2><p>Which grants led to which patents.</p></div>
+    <div class="view-head"><h2>Grants × Patents</h2><p>A US patent from federally funded work carries a government-interest statement, such as “This invention was made with government support under AI066487 awarded by the NIH.” A grant is linked to a patent when that statement names it. A number with its activity code (R43 AI066487) names that award only; a bare number (AI066487) names every stage of the NIH project, so R21/R33 and R43/R44 pairs are both linked.</p></div>
+    <div class="tiles" id="gt-tiles"></div>
     <div class="grid2">
-      <div class="panel">
-        <span class="status">Direct links not built yet</span>
-        <p>US patents from federally funded work carry a government-interest statement, such as “This invention was made with government support under AI066487 awarded by the NIH.” None of the current patent files include that statement. Once it is fetched for the 172 patents, the grant numbers in it can be matched against these grants, and this tab will show them.</p>
-      </div>
-      <div class="panel">
-        <h2>Indirect route: through a paper</h2>
-        <p>A grant's paper that a patent cites. This is a real path between documents but does not mean the grant funded the patent.</p>
-        <div class="tiles" id="gt-tiles" style="grid-template-columns:repeat(3,minmax(0,1fr))"></div>
-      </div>
+      <div class="panel"><h2>Grants behind the most patents</h2><div class="hbars" id="gt-top"></div></div>
+      <div class="panel"><h2>Years from award start to patent filing</h2><p>Filing year minus the award's start year.</p><div class="chart" id="gt-lag"></div></div>
     </div>
     <div class="panel">
-      <h2>Grant → paper → patent</h2>
+      <div class="tbl-head"><h2>Funding links</h2><input type="search" id="q-gt" placeholder="Search grant, patent, number" aria-label="Search grant–patent links"></div>
       <div id="t-gt"></div>
+    </div>
+    <div class="panel">
+      <h2>Federal support with no grant here</h2>
+      <p>Patents whose statement names funding, but no grant in this set: other agencies (DARPA, DTRA, the Army), NIH grants outside the filovirus grant pull, or a number written in a form that doesn't parse.</p>
+      <div id="t-gt-none"></div>
+    </div>
+    <div class="panel">
+      <h2>Indirect route: grant → paper → patent</h2>
+      <p>A grant's paper that a patent cites. This is a real path between documents but does not mean the grant funded the patent.</p>
+      <div class="tiles" id="gb-tiles" style="grid-template-columns:repeat(3,minmax(0,1fr))"></div>
+      <div id="t-gb"></div>
     </div>
   </section>
 
   <footer>
-    <div><b>Sources.</b> Grants: NIH RePORTER projects and publications (federal-biomedical-tech-datasets-script). Papers: the papers workstream's core set and PubMed records of grant-cited papers. Patents: USPTO Patent Public Search and Google Patents (patent_pipeline).</div>
+    <div><b>Sources.</b> Grants: NIH RePORTER projects and publications (federal-biomedical-tech-datasets-script). Papers: the papers workstream's bundle, and PubMed records of grant-cited and patent-cited papers, with their grant lists and reference lists. Patents: USPTO Patent Public Search and Google Patents, including each patent's government-interest statement and citation tables (patent_pipeline, filovirus fetch patent-details).</div>
     <div><b>Grant years</b> are the project start and end dates. 106 grants have none in RePORTER, so their first and last fiscal year in the pull is used (marked “fiscal years” in the Grants table).</div>
     <div><b>Viruses and proteins</b> come from each workstream's own keyword matching against the knowledge graph vocabulary (kg_keywords.csv), mapped onto one list here: Ebola viruses, Marburg viruses, the filovirus family named generally, and the nine filovirus proteins. Patent matches are candidates; some are flagged for review.</div>
     <div id="built"></div>
@@ -392,6 +400,9 @@ D.gp.forEach((l, i) => { gpByGrant[l[0]].push(i); gpByPaper[l[1]].push(i); });
 const tpByPaper = P.map(() => []), tpByPatent = T.map(() => []), txByPatent = T.map(() => []);
 D.tp.forEach((l, i) => { tpByPaper[l[1]].push(i); tpByPatent[l[0]].push(i); });
 D.tx.forEach((l, i) => txByPatent[l[0]].push(i));
+const gtByGrant = G.map(() => []), gtByPatent = T.map(() => []);
+D.gt.forEach((l, i) => { gtByGrant[l[0]].push(i); gtByPatent[l[1]].push(i); });
+const ORIGIN = { 1: "Core set", 2: "Cited by a grant", 3: "Cited by a patent" };
 
 const allYears = [...G.flatMap((g) => [g.y0, g.y1]), ...P.map((p) => p.y), ...T.map((t) => t.y)].filter(Boolean);
 const YMIN = Math.min(...allYears), YMAX = Math.max(...allYears);
@@ -413,6 +424,9 @@ function applyFilters() {
     gp: D.gp.filter((l) => g[l[0]] && p[l[1]]),
     tp: D.tp.filter((l) => t[l[0]] && p[l[1]]),
     tx: D.tx.filter((l) => t[l[0]]),
+    gt: D.gt.filter((l) => g[l[0]] && t[l[1]]),
+    pc: D.pc.filter((l) => p[l[0]] && p[l[1]]),
+    tc: D.tc.filter((l) => t[l[0]] && t[l[1]]),
   };
   const n = (a) => a.filter(Boolean).length;
   const active = F.v !== "" || F.p !== "" || F.y0 !== YMIN || F.y1 !== YMAX;
@@ -519,11 +533,10 @@ function viewOverview() {
     ["Grants", fmt(gi.length), `${money(fund)} awarded`],
     ["Papers", fmt(pi.length), `${fmt(core)} in the core set`],
     ["Patents", fmt(ti.length), `${fmt(granted)} granted, ${fmt(ti.length - granted)} applications; ${fmt(new Set(ti.map((i) => T[i].fam)).size)} inventions`],
-    ["Links between them", fmt(ok.gp.length + ok.tp.length + ok.tx.length), "grant–paper and patent–literature"],
+    ["Links between them", fmt(ok.gp.length + ok.tp.length + ok.tx.length + ok.gt.length), "grant–paper, patent–literature and grant–patent"],
   ]);
 
   // connection map
-  const bridge = bridges().length;
   const node = (x, y, cls, name, n, href) => `<a href="#${href}" aria-label="${name}: ${n}"><circle cx="${x}" cy="${y}" r="50" style="fill:color-mix(in srgb, var(${cls}) 14%, var(--surface));stroke:var(${cls});stroke-width:2"/>
     <text class="nname" x="${x}" y="${y - 2}" text-anchor="middle">${name}</text><text class="ncount" x="${x}" y="${y + 17}" text-anchor="middle">${n}</text></a>`;
   const edge = (x, y, w, lines, href, label) => `<a href="#${href}" aria-label="${esc(label)}"><rect class="ebox" x="${x - w / 2}" y="${y - 10 - (lines.length - 1) * 8}" width="${w}" height="${20 + (lines.length - 1) * 16}" rx="5"/>
@@ -531,14 +544,15 @@ function viewOverview() {
   $("ov-map").innerHTML = `<svg viewBox="0 0 520 330" role="img" aria-label="Grants, papers and patents and the links between them">
     <line x1="110" y1="80" x2="410" y2="80" style="stroke:var(--fg);stroke-width:2"/>
     <line x1="410" y1="80" x2="260" y2="260" style="stroke:var(--fg);stroke-width:2"/>
-    <line x1="110" y1="80" x2="260" y2="260" style="stroke:var(--muted);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="110" y1="80" x2="260" y2="260" style="stroke:var(--fg);stroke-width:2"/>
     ${edge(260, 80, 150, [`${fmt(ok.gp.length)} links`], "grants-papers", `${ok.gp.length} grant–paper links`)}
-    ${edge(352, 172, 156, [`${fmt(ok.tp.length)} dataset papers`, `${fmt(ok.tx.length)} outside works`], "patents-papers", `${ok.tp.length} dataset papers and ${ok.tx.length} outside works cited by patents`)}
-    ${edge(168, 172, 140, ["not linked yet", `${bridge} paths via a paper`], "grants-patents", `Grant–patent links not built yet; ${bridge} indirect via a paper`)}
+    ${edge(352, 172, 156, [`${fmt(ok.tp.length)} papers`, `${fmt(ok.tx.length)} outside works`], "patents-papers", `${ok.tp.length} papers and ${ok.tx.length} outside works cited by patents`)}
+    ${edge(168, 172, 140, [`${fmt(ok.gt.length)} funding links`], "grants-patents", `${ok.gt.length} grant–patent funding links`)}
     ${node(110, 80, "--c-grant", "Grants", fmt(gi.length), "grants")}
     ${node(410, 80, "--c-paper", "Papers", fmt(pi.length), "papers")}
     ${node(260, 260, "--c-patent", "Patents", fmt(ti.length), "patents")}
   </svg>`;
+  $("ov-within").textContent = `Inside each collection: ${fmt(ok.pc.length)} citations from one paper to another, and ${fmt(ok.tc.length)} from one patent to another.`;
 
   // over time, one shared year axis
   const lo = F.y0, hi = F.y1, opts = { height: 110 };
@@ -560,11 +574,13 @@ function viewGrants() {
   const fundOf = new Map(gs.map((g) => [g, inRangeFunding(g)]));
   const total = [...fundOf.values()].reduce((a, b) => a + b, 0);
   const withPapers = gs.filter((g) => gpByGrant[GI.get(g)].some((li) => ok.p[D.gp[li][1]])).length;
+  const nPatents = (g) => gtByGrant[GI.get(g)].filter((li) => ok.t[D.gt[li][1]]).length;
+  const withPatents = gs.filter((g) => nPatents(g)).length;
   tiles($("gr-tiles"), [
     ["Grants", fmt(gs.length), `${fmt(gs.filter((g) => g.r === "strong").length)} strongly on topic`],
     ["Funding", money(total), F.y0 !== YMIN || F.y1 !== YMAX ? `fiscal years ${F.y0}–${F.y1}` : "all fiscal years"],
     ["Institutes", fmt(new Set(gs.map((g) => g.ic)).size), `${fmt(new Set(gs.map((g) => g.o).filter(Boolean)).size)} organizations`],
-    ["With a linked paper", fmt(withPapers), `${pct(withPapers, gs.length)}% of these grants`],
+    ["With a linked paper", fmt(withPapers), `${pct(withPapers, gs.length)}% of these grants · ${fmt(withPatents)} funded a patent`],
   ]);
   const fy = new Map(); for (const g of gs) for (const [y, v] of g.fy) if (y >= F.y0 && y <= F.y1) fy.set(y, (fy.get(y) || 0) + v);
   const ys = [...fy.keys()];
@@ -580,33 +596,39 @@ function viewGrants() {
     { k: "years", h: "Years", cls: "num", cell: (g) => `${g.y0 ?? "?"}–${g.y1 ?? "?"}${g.sd ? "" : `<div class="sub">fiscal years</div>`}`, sort: (g) => g.y0 ?? 0 },
     { k: "fund", h: "Funding", cls: "num", cell: (g) => money(fundOf.get(g)), sort: (g) => fundOf.get(g) },
     { k: "papers", h: "Papers", cls: "num", cell: (g) => fmt(nPapers(g)), sort: nPapers },
+    { k: "patents", h: "Patents", cls: "num", cell: (g) => fmt(nPatents(g)), sort: nPatents },
     { k: "ents", h: "Names", cell: (g) => chips(g.n) },
   ], { q: $("q-grants").value, text: (g) => `${g.c} ${g.k} ${g.t} ${g.pi} ${g.o} ${g.ic}`, sortDefault: ["fund", -1] });
 }
 
 function viewPapers() {
   const set = $("f-pset").value;
-  const ps = idx(ok.p).map((i) => P[i]).filter((p) => set === "all" || (set === "core" ? p.core : gpByPaper[PI_.get(p)].length));
-  const pi = PI_;
-  const core = ps.filter((p) => p.core).length, viaGrant = ps.filter((p) => gpByPaper[pi.get(p)].length).length;
+  const ps = idx(ok.p).map((i) => P[i]).filter((p) => set === "all" || p.o === +set);
+  const pi = PI_, inView = new Set(ps.map((p) => pi.get(p)));
+  const core = ps.filter((p) => p.core).length, viaGrant = ps.filter((p) => gpByPaper[pi.get(p)].some((li) => ok.g[D.gp[li][0]])).length;
+  const cites = ok.pc.filter((l) => inView.has(l[0]) && inView.has(l[1]));
+  const citedBy = count(cites, (l) => l[1]);
   tiles($("pa-tiles"), [
-    ["Papers", fmt(ps.length), `${ps.length ? Math.min(...ps.map((p) => p.y)) : "–"}–${ps.length ? Math.max(...ps.map((p) => p.y)) : "–"}`],
+    ["Papers", fmt(ps.length), `${ps.length ? Math.min(...ps.map((p) => p.y)) : "–"}–${ps.length ? Math.max(...ps.map((p) => p.y)) : "–"} · ${fmt(new Set(ps.map((p) => p.j).filter(Boolean)).size)} journals`],
     ["Core set", fmt(core), "from the papers workstream"],
     ["Linked to a grant", fmt(viaGrant), `${pct(viaGrant, ps.length)}% of these papers`],
-    ["Journals", fmt(new Set(ps.map((p) => p.j).filter(Boolean)).size), ""],
+    ["Citations among them", fmt(cites.length), `${fmt(citedBy.size)} papers cited by another one here`],
   ]);
   const yc = count(ps, (p) => p.y), ys = [...yc.keys()];
   colChart($("pa-year"), ys.length ? yearBins(yc, Math.min(...ys), Math.max(...ys)).map((b) => ({ ...b, tipv: `${fmt(b.v)} papers` })) : [], { color: "var(--c-paper)", label: "Papers by publication year", height: 200 });
   hbars($("pa-jour"), topN(count(ps, (p) => p.j), 10).map(([k, v]) => ({ label: k, v })), { color: "var(--c-paper)" });
   hbars($("pa-src"), topN(count(ps.filter((p) => p.core), (p) => (p.src || "").split(/[;|,]/).map((s) => s.trim())), 8).map(([k, v]) => ({ label: k, v })), { color: "var(--c-paper)", empty: "No core-set papers match the filters." });
+  hbars($("pa-cited"), topN(citedBy, 10).map(([i, v]) => ({ label: `${P[i].t} (${P[i].y ?? "n.d."})`, v, note: ORIGIN[P[i].o].toLowerCase() })), { color: "var(--c-paper)", empty: "No paper here cites another paper here." });
   const nG = (p) => gpByPaper[pi.get(p)].filter((li) => ok.g[D.gp[li][0]]).length;
-  const nT = (p) => tpByPaper[pi.get(p)].length;
+  const nT = (p) => tpByPaper[pi.get(p)].filter((li) => ok.t[D.tp[li][0]]).length;
+  const nC = (p) => citedBy.get(pi.get(p)) || 0;
   table("t-papers", ps, [
     { k: "date", h: "Published", cls: "num", cell: (p) => esc(p.d), sort: (p) => p.d },
     { k: "title", h: "Paper", cell: (p) => `${pmLink(p)}<div class="sub">${esc(p.j)} · PMID ${esc(p.id)}</div>` },
-    { k: "set", h: "Set", cell: (p) => p.core ? `<span class="pill">Core set</span>` : `<span class="pill">Through a grant</span>`, sort: (p) => p.core },
+    { k: "set", h: "Set", cell: (p) => `<span class="pill">${ORIGIN[p.o]}</span>`, sort: (p) => p.o },
     { k: "grants", h: "Grants", cls: "num", cell: (p) => fmt(nG(p)), sort: nG },
     { k: "patents", h: "Cited by patents", cls: "num", cell: (p) => fmt(nT(p)), sort: nT },
+    { k: "cited", h: "Cited by papers here", cls: "num", cell: (p) => fmt(nC(p)), sort: nC },
     { k: "ents", h: "Names", cell: (p) => chips(p.n) },
   ], { q: $("q-papers").value, text: (p) => `${p.t} ${p.j} ${p.id}`, sortDefault: ["date", -1] });
 }
@@ -615,10 +637,12 @@ function viewPatents() {
   const ts = idx(ok.t).map((i) => T[i]);
   const ti = TI;
   const granted = ts.filter((t) => t.g).length, cites = ts.filter((t) => tpByPatent[ti.get(t)].length + txByPatent[ti.get(t)].length).length;
+  const nGrants = (t) => gtByPatent[ti.get(t)].filter((li) => ok.g[D.gt[li][0]]).length;
+  const federal = ts.filter((t) => t.gi).length, funded = ts.filter((t) => nGrants(t)).length;
   tiles($("pt-tiles"), [
     ["Patents", fmt(ts.length), `${fmt(new Set(ts.map((t) => t.fam)).size)} distinct inventions (patent families)`],
     ["Granted", fmt(granted), `${fmt(ts.length - granted)} published applications`],
-    ["With an assignee", fmt(ts.filter((t) => t.asg).length), "the rest list none"],
+    ["Federally funded", fmt(federal), `${fmt(funded)} name a grant in this set`],
     ["Citing literature", fmt(cites), `${pct(cites, ts.length)}% of these patents`],
   ]);
   const yc = count(ts, (t) => t.y), ys = [...yc.keys()];
@@ -628,13 +652,19 @@ function viewPatents() {
   segBar($("pt-review"), [{ cls: "k-stay", label: "Likely valid", v: valid }, { cls: "k-empty", label: "Needs review", v: review, quiet: true }], valid + review);
   hbars($("pt-asg"), topN(count(ts, (t) => t.asg), 8).map(([k, v]) => ({ label: k, v })), { color: "var(--c-patent)", empty: "No patents with an assignee match the filters." });
   hbars($("pt-inv"), topN(count(ts, (t) => t.inv.replace(" et al.", "")), 10).filter(([, v]) => v > 1).map(([k, v]) => ({ label: k, v })), { color: "var(--c-patent)", empty: "No inventor has more than one patent here." });
+  const inView = new Set(ts.map((t) => ti.get(t)));
+  const citedBy = count(ok.tc.filter((l) => inView.has(l[0]) && inView.has(l[1])), (l) => l[1]);
+  hbars($("pt-cited"), topN(citedBy, 10).map(([i, v]) => ({ label: `${T[i].id} · ${T[i].t}`, v, note: `filed ${T[i].y}` })), { color: "var(--c-patent)", empty: "No patent here cites another patent here." });
   const nLit = (t) => tpByPatent[ti.get(t)].length + txByPatent[ti.get(t)].length;
+  const nCited = (t) => citedBy.get(ti.get(t)) || 0;
   table("t-patents", ts, [
     { k: "filed", h: "Filed", cls: "num", cell: (t) => esc(t.f), sort: (t) => t.f },
     { k: "num", h: "Patent", cell: (t) => `${ptLink(t)}<div class="sub">${t.g ? "Granted" : "Application"}</div>`, sort: (t) => t.id },
     { k: "title", h: "Title", cell: (t) => `${esc(t.t)}<div class="sub">${esc([t.asg, t.inv].filter(Boolean).join(" · "))}</div>` },
     { k: "how", h: "Found by", cell: (t) => `<span class="sub">${esc(HOW[t.how])}</span>` , sort: (t) => t.how },
+    { k: "grants", h: "Grants", cls: "num", cell: (t) => fmt(nGrants(t)), sort: nGrants },
     { k: "lit", h: "Literature cited", cls: "num", cell: (t) => fmt(nLit(t)), sort: nLit },
+    { k: "pcited", h: "Cited by patents here", cls: "num", cell: (t) => fmt(nCited(t)), sort: nCited },
     { k: "ents", h: "Names", cell: (t) => chips(t.n) },
   ], { q: $("q-patents").value, text: (t) => `${t.id} ${t.t} ${t.asg} ${t.inv}`, sortDefault: ["filed", -1] });
 }
@@ -652,7 +682,9 @@ function viewGrantsPapers() {
     { label: "The paper's PubMed record lists the grant", v: L.filter((l) => l[2] & PUBMED).length },
     { label: "A grant PI wrote it after the award started", v: L.filter((l) => l[2] & PI).length },
   ], { color: "var(--accent)" });
-  segBar($("gp-topic"), ["s", "a", "n", "e"].map((k) => ({ cls: `k-${TOPIC[k][0]}`, label: TOPIC[k][1], v: cited.filter((l) => l[3] === k).length, dark: k === "a", quiet: k === "e" })), cited.length);
+  const compared = cited.filter((l) => l[3]);
+  $("gp-topic-note").textContent = cited.length > compared.length ? `${fmt(cited.length - compared.length)} citations the grants workstream hasn't compared yet are left out.` : "";
+  segBar($("gp-topic"), ["s", "a", "n", "e"].map((k) => ({ cls: `k-${TOPIC[k][0]}`, label: TOPIC[k][1], v: compared.filter((l) => l[3] === k).length, dark: k === "a", quiet: k === "e" })), compared.length);
   const lag = new Map(); for (const l of cited) { const g = G[l[0]], p = P[l[1]]; if (g.y0 && p.y) { const d = Math.max(-1, Math.min(15, p.y - g.y0)); lag.set(d, (lag.get(d) || 0) + 1); } }
   const lagBins = []; for (let d = -1; d <= 15; d++) lagBins.push({ x: d === -1 ? "<0" : d === 15 ? "15+" : String(d), v: lag.get(d) || 0, tip: d === -1 ? "Before award start" : d === 15 ? "15 or more years after start" : `${d} year${d === 1 ? "" : "s"} after start`, tipv: `${fmt(lag.get(d) || 0)} papers` });
   colChart($("gp-lag"), lagBins, { color: "var(--accent)", label: "Years from award start to publication", xEvery: 1 });
@@ -676,8 +708,8 @@ function viewPatentsPapers() {
   const median = !ages.length ? null : ages.length % 2 ? ages[mid] : (ages[mid - 1] + ages[mid]) / 2;
   tiles($("pp-tiles"), [
     ["Patents citing literature", fmt(pats.size), ""],
-    ["Citations", fmt(tp.length + tx.length), `${fmt(tp.length)} to dataset papers`],
-    ["Dataset papers cited", fmt(new Set(tp.map((l) => l[1])).size), "all from the core set"],
+    ["Citations", fmt(tp.length + tx.length), `${fmt(tp.length)} linked to a paper`],
+    ["Papers cited", fmt(new Set(tp.map((l) => l[1])).size), `${fmt(new Set(tp.filter((l) => P[l[1]].core).map((l) => l[1])).size)} from the core set`],
     ["Median age at filing", median == null ? "–" : `${median} yr`, "filing year − publication year"],
   ]);
   const ac = new Map(); for (const a of ages) { const b = Math.max(-1, Math.min(25, a)); ac.set(b, (ac.get(b) || 0) + 1); }
@@ -688,9 +720,10 @@ function viewPatentsPapers() {
   table("t-pp-team", tp, [
     { k: "pat", h: "Patent", cell: (l) => `${ptLink(T[l[0]])}<div class="sub">${esc(T[l[0]].t)}</div>`, sort: (l) => T[l[0]].id },
     { k: "paper", h: "Cites paper", cell: (l) => `${pmLink(P[l[1]])}<div class="sub">${esc(P[l[1]].j)} · ${P[l[1]].y}</div>` },
+    { k: "set", h: "Set", cell: (l) => `<span class="pill">${ORIGIN[P[l[1]].o]}</span>`, sort: (l) => P[l[1]].o },
     { k: "grants", h: "Paper's grants", cls: "num", cell: (l) => fmt(gpByPaper[l[1]].length), sort: (l) => gpByPaper[l[1]].length },
-    { k: "match", h: "Match", cell: (l) => `<span class="pill">${esc(l[2])}</span>` },
-  ], { empty: "No dataset papers are cited by patents that match the filters.", sortDefault: ["pat", 1] });
+    { k: "match", h: "Matched by", cell: (l) => `<span class="sub">${esc(l[2] === "resolved reference" ? "reference resolved in PubMed" : `patent pipeline (${l[2]})`)}</span>` },
+  ], { q: $("q-pp-team").value, text: (l) => `${T[l[0]].id} ${T[l[0]].t} ${P[l[1]].t} ${P[l[1]].id}`, empty: "No papers are cited by patents that match the filters.", sortDefault: ["pat", 1] });
   table("t-pp-ext", tx, [
     { k: "pat", h: "Patent", cell: (l) => `${ptLink(T[l[0]])}<div class="sub">filed ${T[l[0]].y}</div>`, sort: (l) => T[l[0]].id },
     { k: "cite", h: "Cited work", cell: (l) => esc(l[1]) },
@@ -705,13 +738,38 @@ function bridges() {
   return out;
 }
 function viewGrantsPatents() {
-  const B = bridges();
+  const L = ok.gt, ts = idx(ok.t);
+  const fed = ts.filter((i) => T[i].gi), unmatched = fed.filter((i) => !gtByPatent[i].length);
+  const linkedPatents = new Set(L.map((l) => l[1])), linkedGrants = new Set(L.map((l) => l[0]));
   tiles($("gt-tiles"), [
+    ["Funding links", fmt(L.length), "grant named in a patent"],
+    ["Grants", fmt(linkedGrants.size), `${money([...linkedGrants].reduce((s, g) => s + inRangeFunding(G[g]), 0))} awarded`],
+    ["Patents", fmt(linkedPatents.size), `of ${fmt(fed.length)} that state federal support`],
+    ["Inventions", fmt(new Set([...linkedPatents].map((t) => T[t].fam)).size), "patent families"],
+  ]);
+  hbars($("gt-top"), topN(count(L, (l) => l[0]), 10).map(([g, v]) => ({ label: `${G[g].c} · ${G[g].t}`, v, note: G[g].o })), { color: "var(--c-grant)", empty: "No funding links match the filters." });
+  const lag = new Map(); for (const l of L) { const g = G[l[0]], t = T[l[1]]; if (g.y0 && t.y) { const d = Math.max(-1, Math.min(15, t.y - g.y0)); lag.set(d, (lag.get(d) || 0) + 1); } }
+  const lagBins = []; for (let d = -1; d <= 15; d++) lagBins.push({ x: d === -1 ? "<0" : d === 15 ? "15+" : String(d), v: lag.get(d) || 0, tip: d === -1 ? "Filed before award start" : d === 15 ? "15 or more years after start" : `${d} year${d === 1 ? "" : "s"} after start`, tipv: `${fmt(lag.get(d) || 0)} links` });
+  colChart($("gt-lag"), lagBins, { color: "var(--c-patent)", label: "Years from award start to patent filing", xEvery: 2 });
+  table("t-gt", L, [
+    { k: "grant", h: "Grant", cell: (l) => `${grLink(G[l[0]])}<div class="sub">${esc(G[l[0]].t)}</div>`, sort: (l) => G[l[0]].c },
+    { k: "years", h: "Award", cls: "num", cell: (l) => `${G[l[0]].y0 ?? "?"}–${G[l[0]].y1 ?? "?"}`, sort: (l) => G[l[0]].y0 ?? 0 },
+    { k: "patent", h: "Funded patent", cell: (l) => `${ptLink(T[l[1]])}<div class="sub">${esc(T[l[1]].t)}</div>`, sort: (l) => T[l[1]].id },
+    { k: "filed", h: "Filed", cls: "num", cell: (l) => esc(T[l[1]].f), sort: (l) => T[l[1]].f },
+    { k: "num", h: "Named as", cell: (l) => `<span class="pill">${esc(l[2])}</span>` },
+  ], { q: $("q-gt").value, text: (l) => `${G[l[0]].c} ${G[l[0]].t} ${G[l[0]].pi} ${T[l[1]].id} ${T[l[1]].t} ${l[2]}`, empty: "No funding links match the filters.", sortDefault: ["filed", -1] });
+  table("t-gt-none", unmatched.map((i) => T[i]), [
+    { k: "pat", h: "Patent", cell: (t) => `${ptLink(t)}<div class="sub">${esc(t.t)} · filed ${t.y}</div>`, sort: (t) => t.id },
+    { k: "st", h: "Statement", cell: (t) => `<span class="sub">${esc(t.gi)}</span>` },
+  ], { empty: "Every federally funded patent here names a grant in the set.", sortDefault: ["pat", 1], page: 10 });
+
+  const B = bridges();
+  tiles($("gb-tiles"), [
     ["Grants", fmt(new Set(B.map((b) => b[0])).size), ""],
     ["Papers", fmt(new Set(B.map((b) => b[1])).size), ""],
     ["Patents", fmt(new Set(B.map((b) => b[2])).size), ""],
   ]);
-  table("t-gt", B, [
+  table("t-gb", B, [
     { k: "grant", h: "Grant", cell: (b) => `${grLink(G[b[0]])}<div class="sub">${esc(G[b[0]].t)}</div>`, sort: (b) => G[b[0]].c },
     { k: "paper", h: "Paper", cell: (b) => `${pmLink(P[b[1]])}<div class="sub">${P[b[1]].y} · ${b[3] & (PUBMED | REPORTER) ? "cites the grant" : "written by a grant PI"}</div>` },
     { k: "patent", h: "Cited by patent", cell: (b) => `${ptLink(T[b[2]])}<div class="sub">${esc(T[b[2]].t)} · filed ${T[b[2]].y}</div>`, sort: (b) => T[b[2]].y },
@@ -739,7 +797,7 @@ function onFilter() {
 for (const id of ["f-virus", "f-protein", "f-y0", "f-y1"]) $(id).addEventListener("change", onFilter);
 $("f-pset").addEventListener("change", () => { TBL["t-papers"] && (TBL["t-papers"].shown = 25); render(); });
 $("reset").addEventListener("click", () => { $("f-virus").value = ""; $("f-protein").value = ""; $("f-y0").value = YMIN; $("f-y1").value = YMAX; onFilter(); });
-for (const [q, t] of [["q-grants", "t-grants"], ["q-papers", "t-papers"], ["q-patents", "t-patents"], ["q-gp", "t-gp"], ["q-pp", "t-pp-ext"]]) {
+for (const [q, t] of [["q-grants", "t-grants"], ["q-papers", "t-papers"], ["q-patents", "t-patents"], ["q-gp", "t-gp"], ["q-pp", "t-pp-ext"], ["q-pp-team", "t-pp-team"], ["q-gt", "t-gt"]]) {
   $(q).addEventListener("input", () => { if (TBL[t]) TBL[t].shown = 25; render(); });
 }
 $("ov-matrix").addEventListener("click", (e) => {
@@ -766,7 +824,7 @@ document.addEventListener("pointermove", (e) => { const el = e.target.closest?.(
 document.addEventListener("focusin", (e) => { const el = e.target.closest?.("[data-tv]"); if (el) { const r = el.getBoundingClientRect(); showTip(el, r.left + r.width / 2, r.top); } else tip.hidden = true; });
 document.addEventListener("focusout", () => { tip.hidden = true; });
 
-$("built").innerHTML = `Built ${esc(D.built)} by <b>dashboard/build_dashboard.py</b> from the workstreams' CSV outputs. Rerun it after any of them changes.`;
+$("built").innerHTML = `Built ${esc(D.built)} by <b>dashboard/build_dashboard.py</b> from data/ and the workstreams' CSV outputs. Rerun it after any of them changes.`;
 applyFilters();
 route();
 </script>
