@@ -234,6 +234,7 @@ footer b { color: var(--fg); font-weight: 500; }
 .x-examples { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
 .x-examples button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--surface); color: var(--fg); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
 .x-examples button:hover { border-color: var(--accent); }
+.x-src { margin: 0; font-size: 12px; color: var(--muted); }
 .x-controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: end; padding: 12px 0; border-top: 2px solid var(--fg); border-bottom: 1px solid var(--rule); }
 .x-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; padding-bottom: 6px; }
 .x-groups { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; }
@@ -334,6 +335,7 @@ code { font-family: var(--font-mono); font-size: .92em; background: var(--chip);
         <ul id="x-sug" role="listbox" hidden></ul>
       </div>
       <div class="x-examples" id="x-examples" aria-label="Examples"></div>
+      <p class="x-src" id="x-src"></p>
     </div>
 
     <div class="x-controls" role="group" aria-label="Subgraph settings">
@@ -947,7 +949,7 @@ function viewGrantsPatents() {
 // ---------- graph explorer ----------
 // The graph (Neo4j export, trimmed by build_explorer.py): nodes [label, key, name, props|0, aliases],
 // edges flat [source, target, relType, ...], eprops {edgeIndex: [confidence, matched_terms, support]}.
-const KG = null;  // filled by build_explorer.py
+let KG = null;  // filled by build_explorer.py, or switched to live Neo4j by `filovirus serve`
 const XGROUPS = [
   ["virus", "Viruses & disease", ["Taxon", "Isolate", "Condition", "Symptom"]],
   ["protein", "Genes & proteins", ["Gene", "GeneFamily", "GeneDomain", "Protein", "Structure", "Sequence", "Feature", "Alignment"]],
@@ -964,15 +966,21 @@ const lname = (l) => XLNAME[l] || l;
 const XPRI = { Taxon: 0, GeneFamily: 0, Gene: 1, Countermeasure: 1, Antibody: 1, Condition: 1, Symptom: 1, Structure: 2, Epitope: 2, Grant: 2, Publication: 2, Patent: 2, Organization: 2, AssayType: 2, Study: 2, GeneDomain: 3, Isolate: 4, Protein: 5, Sequence: 5, EpitopeAssay: 5, GrantFunding: 5, Feature: 5 };
 const XDRAW = 1500, XEXP = 300;
 
-const X = KG && (() => {
+// Live mode (`filovirus serve`, /explore): KG starts with no nodes; each search asks the server, and
+// each subgraph is fetched from Neo4j and replaces KG's nodes and edges (with every node's true degree).
+const XLIVE = !!(KG && KG.live);
+const XGOF = {}; XGROUPS.forEach(([, , ls], gi) => ls.forEach((l) => (XGOF[l] = gi)));
+const lgrp = (li) => XGOF[KG.labels[li]] ?? 7;
+let X = KG ? xIndex() : null;
+function xIndex() {
   const N = KG.nodes.length, E = KG.edges.length / 3, ed = KG.edges;
-  const gOf = {}; XGROUPS.forEach(([, , ls], gi) => ls.forEach((l) => (gOf[l] = gi)));
-  const labGrp = KG.labels.map((l) => gOf[l] ?? 7);
-  const grp = new Uint8Array(N), deg = new Uint32Array(N);
+  const labGrp = KG.labels.map((l, li) => lgrp(li));
+  const grp = new Uint8Array(N), ldeg = new Uint32Array(N);
   KG.nodes.forEach((n, i) => (grp[i] = labGrp[n[0]]));
-  for (let e = 0; e < E; e++) { deg[ed[3 * e]]++; deg[ed[3 * e + 1]]++; }
+  for (let e = 0; e < E; e++) { ldeg[ed[3 * e]]++; ldeg[ed[3 * e + 1]]++; }
+  const deg = KG.deg ? Uint32Array.from(KG.deg) : ldeg;   // links in the whole graph
   const off = new Uint32Array(N + 1);
-  for (let i = 0; i < N; i++) off[i + 1] = off[i] + deg[i];
+  for (let i = 0; i < N; i++) off[i + 1] = off[i] + ldeg[i];
   const fill = off.slice(0, N), nb = new Uint32Array(2 * E), ne = new Uint32Array(2 * E);
   for (let e = 0; e < E; e++) {
     const a = ed[3 * e], b = ed[3 * e + 1];
@@ -982,9 +990,10 @@ const X = KG && (() => {
   const lab = (i) => KG.labels[KG.nodes[i][0]];
   const childOf = KG.rels.indexOf("CHILD_OF");
   const groupCount = new Array(XGROUPS.length).fill(0);
-  for (let i = 0; i < N; i++) groupCount[grp[i]]++;
+  if (KG.live) KG.labels.forEach((l, li) => (groupCount[labGrp[li]] += KG.neo4j.nodes[l] || 0));
+  else for (let i = 0; i < N; i++) groupCount[grp[i]]++;
   return { N, E, grp, deg, off, nb, ne, hay, lab, childOf, groupCount };
-})();
+}
 
 const xs = { seed: null, sub: null, sel: null, selType: null, selKey: null, mode: "type", expanded: new Set(), trail: [], on: XGROUPS.map(() => true), sim: null, transform: null, colors: null, shown: 50, built: false };
 const xcolor = (gi) => xs.colors[gi];
@@ -1020,9 +1029,28 @@ function xSearch(q) {
   hits.sort((a, b) => a.s - b.s || b.d - a.d);
   return out.concat(hits.slice(0, 14 - out.length));
 }
-function xMeta(i) {
-  const n = KG.nodes[i], p = n[3] || {};
-  const bits = [lname(X.lab(i)), `${keyProp(i)} ${n[1]}`];
+async function xApi(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  let j = {};
+  try { j = await r.json(); } catch { /* not JSON */ }
+  if (!r.ok || j.error) throw new Error(j.error || `The server answered ${r.status}.`);
+  return j;
+}
+// Results: {v} a virus group, {i} a record in the embedded graph, {id, n, d} a record found by the server.
+async function xSearchAny(q, limit = 14) {
+  if (!XLIVE) return xSearch(q);
+  const t = q.trim().toLowerCase();
+  if (!t) return [];
+  const out = KG.viruses.filter((v) => v.label.toLowerCase().includes(t)).map((v) => ({ v }));
+  const r = await xApi("/api/explore/search", { q: t, limit: Math.max(1, limit - out.length) });
+  return out.concat(r.results.map((x) => ({ id: x.id, n: x.node, d: x.deg })));
+}
+const hRow = (h) => h.n || KG.nodes[h.i];
+const hDeg = (h) => h.n ? h.d : X.deg[h.i];
+function xMeta(i) { return xMetaRow(KG.nodes[i]); }
+function xMetaRow(n) {
+  const p = n[3] || {};
+  const bits = [lname(KG.labels[n[0]]), `${KG.keys[n[0]]} ${n[1]}`];
   for (const k of ["date", "aa_length", "taxon_rank", "species", "organism", "pubmed_id", "document_id", "award_key", "symbol", "xref_ncbi_protein_id"]) {
     if (p[k] !== undefined && bits.length < 4) bits.push(k === "aa_length" ? `${p[k]} aa` : String(p[k]));
   }
@@ -1034,16 +1062,20 @@ function xRenderSug() {
   if (!xSugItems.length) { ul.hidden = true; $("x-q").setAttribute("aria-expanded", "false"); return; }
   ul.innerHTML = xSugItems.map((h, k) => h.v
     ? `<li role="option" id="xs-${k}" data-k="${k}" aria-selected="${k === xSugAt}">${dot(0)}<span class="nm"><b>${esc(h.v.label)}</b></span><span class="dg">virus group</span><span class="mt">Every taxon filed under it, with sub-taxa and strains</span></li>`
-    : `<li role="option" id="xs-${k}" data-k="${k}" aria-selected="${k === xSugAt}">${dot(X.grp[h.i])}<span class="nm">${esc(KG.nodes[h.i][2])}</span><span class="dg">${fmt(X.deg[h.i])} links</span><span class="mt">${esc(xMeta(h.i))}</span></li>`).join("");
+    : `<li role="option" id="xs-${k}" data-k="${k}" aria-selected="${k === xSugAt}">${dot(lgrp(hRow(h)[0]))}<span class="nm">${esc(hRow(h)[2])}</span><span class="dg">${fmt(hDeg(h))} links</span><span class="mt">${esc(xMetaRow(hRow(h)))}</span></li>`).join("");
   ul.hidden = false; $("x-q").setAttribute("aria-expanded", "true");
   $("x-q").setAttribute("aria-activedescendant", xSugAt >= 0 ? `xs-${xSugAt}` : "");
 }
 function xPick(h) {
   xSugItems = []; xRenderSug();
-  if (h.v) xSeed({ nodes: h.v.taxa.map((t) => KG.taxonIdx[t]).filter((x) => x !== undefined), kind: "Virus group", name: h.v.label });
-  else xSeed({ nodes: [h.i], kind: lname(X.lab(h.i)), name: KG.nodes[h.i][2] });
   $("x-q").value = "";
+  if (h.v) return xSeed(XLIVE ? { taxa: h.v.taxa, kind: "Virus group", name: h.v.label }
+    : { nodes: h.v.taxa.map((t) => KG.taxonIdx[t]).filter((x) => x !== undefined), kind: "Virus group", name: h.v.label });
+  const row = hRow(h);
+  return xSeed({ ...(XLIVE ? { ids: [h.id] } : { nodes: [h.i] }), kind: lname(KG.labels[row[0]]), name: row[2] });
 }
+// A record as a starting point: by index in the embedded graph, by Neo4j element id when live.
+const xSeedOf = (i) => ({ ...(XLIVE ? { ids: [KG.ids[i]] } : { nodes: [i] }), kind: lname(X.lab(i)), name: KG.nodes[i][2] });
 
 // ----- subgraph -----
 // fromTrail: "push" adds to the trail (Explore from here), a number jumps back to that step, otherwise a new trail.
@@ -1051,8 +1083,27 @@ function xSeed(seed, fromTrail) {
   if (fromTrail === "push") xs.trail.push(seed);
   else if (typeof fromTrail === "number") xs.trail = xs.trail.slice(0, fromTrail + 1);
   else xs.trail = [seed];
-  xs.seed = seed; xs.sel = seed.nodes[0] ?? null; xs.selType = null; xs.userSel = false; xs.shown = 50; xs.expanded = new Set(); xs.pos = null;
-  xBuild();
+  xs.seed = seed; xs.selType = null; xs.userSel = false; xs.shown = 50; xs.expanded = new Set(); xs.pos = null;
+  if (!XLIVE) { xs.sel = seed.nodes[0] ?? null; xBuild(); return; }
+  return xFetch();
+}
+// Live: fetch the subgraph for the current start and settings, then build it like an embedded one.
+let xFetchSeq = 0;
+async function xFetch() {
+  const seed = xs.seed, seq = ++xFetchSeq;
+  $("x-seedkind").textContent = seed.kind; $("x-seedname").textContent = seed.name;
+  $("x-seednote").textContent = "Loading from Neo4j…";
+  try {
+    const r = await xApi("/api/explore/subgraph", { ids: seed.ids, taxa: seed.taxa, hops: +$("x-hops").value, subtaxa: $("x-sub").checked });
+    if (seq !== xFetchSeq) return;   // a newer request replaced this one
+    Object.assign(KG, { ids: r.ids, nodes: r.nodes, edges: r.edges, eprops: r.eprops, rels: r.rels, deg: r.deg });
+    X = xIndex();
+    seed.nodes = r.starts;
+    xs.pos = null; xs.sel = seed.nodes[0] ?? null; xs.selType = null;
+    xBuild();
+  } catch (e) {
+    if (seq === xFetchSeq) $("x-seednote").textContent = `Couldn't load this subgraph: ${e.message}`;
+  }
 }
 function xRenderCrumbs() {
   const el = $("x-crumbs"), type = xs.mode === "type";
@@ -1169,10 +1220,11 @@ function xRenderDetail() {
   const i = xs.sel;
   if (i === null || !xs.sub) { el.innerHTML = `<p class="note">Select a node in the drawing or the table to see its record.</p>`; return; }
   const n = KG.nodes[i], p = n[3] || {}, { hop, sdeg } = xs.sub, lk = xLink(i);
-  const groups = new Map(); let outside = 0;
+  const groups = new Map(); let inside = 0;
   for (let k = X.off[i]; k < X.off[i + 1]; k++) {
     const v = X.nb[k], e = X.ne[k];
-    if (!hop.has(v)) { outside++; continue; }
+    if (!hop.has(v)) continue;
+    inside++;
     const out = KG.edges[3 * e] === i, key = `${out ? "→" : "←"} ${KG.rels[KG.edges[3 * e + 2]]} · ${lname(X.lab(v))}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(v);
@@ -1192,7 +1244,7 @@ function xRenderDetail() {
       <div class="x-rel">${esc(key)} (${fmt(vs.length)})</div>
       <div class="x-nb">${vs.slice(0, 8).map((v) => `<button type="button" data-i="${v}">${dot(X.grp[v])}<span>${esc(KG.nodes[v][2])}</span></button>`).join("")}
       ${vs.length > 8 ? `<span class="sub">and ${fmt(vs.length - 8)} more in the table</span>` : ""}</div>`).join("")}
-    ${outside ? `<p class="note">${fmt(outside)} more link${outside === 1 ? "" : "s"} lead outside this subgraph.</p>` : ""}`;
+    ${X.deg[i] > inside ? `<p class="note">${fmt(X.deg[i] - inside)} more link${X.deg[i] - inside === 1 ? "" : "s"} lead outside this subgraph.</p>` : ""}`;
 }
 const XPLURAL = { Taxon: "virus taxa", Publication: "papers", GrantFunding: "grant funding years", Study: "studies", Biosample: "biosamples", Alignment: "alignments" };
 function xPlural(li) { const l = KG.labels[li]; if (XPLURAL[l]) return XPLURAL[l]; const n = lname(l).toLowerCase(); return /[^aeiou]y$/.test(n) ? n.slice(0, -1) + "ies" : n + "s"; }
@@ -1601,33 +1653,47 @@ function xInit() {
   $("x-groups").innerHTML = XGROUPS.map(([k, name], gi) => `<button type="button" data-g="${gi}" aria-pressed="${xs.on[gi]}">${dot(gi)}${esc(name)} <span class="n">${fmt(X.groupCount[gi])}</span></button>`).join("");
   $("x-tgroup").insertAdjacentHTML("beforeend", `<optgroup label="Groups">${XGROUPS.map(([, name], gi) => `<option value="${gi}">${esc(name)}</option>`).join("")}</optgroup>`
     + `<optgroup label="Record types">${KG.labels.map((l, li) => [xCap(xPlural(li)), li]).sort().map(([n, li]) => `<option value="l${li}">${esc(n)}</option>`).join("")}</optgroup>`);
-  const find = (label, name) => { const l = KG.labels.indexOf(label); return KG.nodes.findIndex((n) => n[0] === l && String(n[2]).toLowerCase() === name.toLowerCase()); };
-  const ex = [];
-  const vg = KG.viruses.find((v) => v.key === "marburg_all"); if (vg) ex.push([{ v: vg }, "Marburg viruses", 0]);
-  for (const [l, nm, short] of [["GeneFamily", "VP35: Polymerase cofactor VP35", "VP35 gene family"], ["Gene", "GP", "Ebola GP gene"], ["Antibody", "KZ52", "KZ52 antibody"], ["Countermeasure", "Inmazeb (REGN-EB3)", "Inmazeb"], ["Symptom", "Fever", "Fever"]]) {
-    let i = find(l, nm);
-    if (i < 0 && l === "GeneFamily") i = KG.nodes.findIndex((n) => KG.labels[n[0]] === l && String(n[2]).startsWith("VP35"));
-    if (i >= 0) ex.push([{ i }, short, X.grp[i]]);
-  }
-  $("x-examples").innerHTML = `<span>Examples:</span>` + ex.map(([, s, g], k) => `<button type="button" data-ex="${k}">${dot(g)}${esc(s)}</button>`).join("");
-  $("x-examples").addEventListener("click", (e) => { const b = e.target.closest("[data-ex]"); if (b) xPick(ex[+b.dataset.ex][0]); });
-  const q = $("x-q"); let qt;
-  q.addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { xSugItems = xSearch(q.value); xSugAt = xSugItems.length ? 0 : -1; xRenderSug(); }, 110); });
+  // Examples are searches: [record type, search text, chip text]; a virus group by its key.
+  const ex = [["virus", "marburg_all", "Marburg viruses"], ["GeneFamily", "VP35", "VP35 gene family"], ["Gene", "GP", "Ebola GP gene"],
+    ["Antibody", "KZ52", "KZ52 antibody"], ["Countermeasure", "Inmazeb", "Inmazeb"], ["Symptom", "Fever", "Fever"]]
+    .filter(([l, q]) => l !== "virus" || KG.viruses.some((v) => v.key === q));
+  const runExample = async ([l, q]) => {
+    if (l === "virus") return xPick({ v: KG.viruses.find((v) => v.key === q) });
+    try {
+      const hits = (await xSearchAny(q, 40)).filter((h) => !h.v);
+      const h = hits.find((h) => KG.labels[hRow(h)[0]] === l) || hits[0];
+      if (h) return xPick(h);
+    } catch (e) { $("x-seednote").textContent = `Search failed: ${e.message}`; }
+  };
+  xs.runExample = runExample; xs.examples = ex;
+  $("x-examples").innerHTML = `<span>Examples:</span>` + ex.map(([l, , s], k) => `<button type="button" data-ex="${k}">${dot(l === "virus" ? 0 : lgrp(KG.labels.indexOf(l)))}${esc(s)}</button>`).join("");
+  $("x-examples").addEventListener("click", (e) => { const b = e.target.closest("[data-ex]"); if (b) runExample(ex[+b.dataset.ex]); });
+  $("x-src").textContent = XLIVE
+    ? `Live from Neo4j: the full graph, ${fmt(Object.values(KG.neo4j.nodes).reduce((a, b) => a + b, 0))} records, read fresh for every search.`
+    : `Searching a copy of the graph from ${KG.built}: ${fmt(X.N)} records, with the genome-annotation features left out. For the full, live graph, run filovirus serve and open localhost:8765/explore.`;
+  const q = $("x-q"); let qt, qseq = 0;
+  const suggest = async () => {
+    const mine = ++qseq;
+    try { const items = await xSearchAny(q.value); if (mine !== qseq) return; xSugItems = items; }
+    catch (e) { if (mine !== qseq) return; xSugItems = []; $("x-seednote").textContent = `Search failed: ${e.message}`; }
+    xSugAt = xSugItems.length ? 0 : -1; xRenderSug();
+  };
+  q.addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(suggest, XLIVE ? 200 : 110); });
   q.addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") { if (!xSugItems.length) return; e.preventDefault(); xSugAt = (xSugAt + (e.key === "ArrowDown" ? 1 : -1) + xSugItems.length) % xSugItems.length; xRenderSug(); $("xs-" + xSugAt)?.scrollIntoView({ block: "nearest" }); }
-    else if (e.key === "Enter") { e.preventDefault(); clearTimeout(qt); if (!xSugItems.length) { xSugItems = xSearch(q.value); xSugAt = 0; } if (xSugItems[xSugAt]) xPick(xSugItems[xSugAt]); }
+    else if (e.key === "Enter") { e.preventDefault(); clearTimeout(qt); (xSugItems.length ? Promise.resolve() : suggest()).then(() => { if (xSugItems[xSugAt]) xPick(xSugItems[xSugAt]); }); }
     else if (e.key === "Escape") { xSugItems = []; xRenderSug(); }
   });
   q.addEventListener("blur", () => setTimeout(() => { xSugItems = []; xRenderSug(); }, 150));
   $("x-sug").addEventListener("mousedown", (e) => { const li = e.target.closest("[data-k]"); if (li) { e.preventDefault(); xPick(xSugItems[+li.dataset.k]); } });
-  for (const id of ["x-hops", "x-sub"]) $(id).addEventListener("change", () => xs.seed && xBuild());
+  for (const id of ["x-hops", "x-sub"]) $(id).addEventListener("change", () => xs.seed && (XLIVE ? xFetch() : xBuild()));
   $("x-groups").addEventListener("click", (e) => { const b = e.target.closest("[data-g]"); if (!b) return; const g = +b.dataset.g; xs.on[g] = !xs.on[g]; b.setAttribute("aria-pressed", xs.on[g]); xBuild(); });
   $("x-tgroup").addEventListener("change", () => { xs.shown = 50; xRenderTable(); });
   $("x-tq").addEventListener("input", () => { xs.shown = 50; xRenderTable(); });
   $("x-table").addEventListener("click", (e) => { if (e.target.id === "x-more") { xs.shown += 200; xRenderTable(); return; } const tr = e.target.closest("tr.x-row"); if (tr) xSelect(+tr.dataset.i, true); });
   $("x-table").addEventListener("keydown", (e) => { const tr = e.target.closest("tr.x-row"); if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); xSelect(+tr.dataset.i, true); } });
   $("x-detail").addEventListener("click", (e) => {
-    if (e.target.id === "x-from") { const i = xs.sel; xSeed({ nodes: [i], kind: lname(X.lab(i)), name: KG.nodes[i][2] }, "push"); return; }
+    if (e.target.id === "x-from") { xSeed(xSeedOf(xs.sel), "push"); return; }
     const ex = e.target.closest("[data-expand]"); if (ex) { xToggleExpand(+ex.dataset.expand); return; }
     if (e.target.id === "x-totable") { $("x-tgroup").value = "l" + e.target.dataset.li; $("x-tq").value = ""; xs.shown = 50; xRenderTable(); $("x-table").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     const t = e.target.closest("[data-type]"); if (t) { xSelectType(+t.dataset.type, true); return; }
@@ -1654,8 +1720,7 @@ function xInit() {
       ?? (xFallback(text), $("x-extext").select());
   });
   xInitCanvas();
-  const start = KG.nodes.findIndex((n) => KG.labels[n[0]] === "Countermeasure" && /inmazeb/i.test(n[2]));
-  xSeed(start >= 0 ? { nodes: [start], kind: "Countermeasure", name: KG.nodes[start][2] } : { nodes: [0], kind: lname(X.lab(0)), name: KG.nodes[0][2] });
+  runExample(ex.find((e) => e[1] === "Inmazeb") || ex[0]);
 }
 function viewExplore() {
   if (!KG) return;
@@ -1713,7 +1778,8 @@ document.addEventListener("focusin", (e) => { const el = e.target.closest?.("[da
 document.addEventListener("focusout", () => { tip.hidden = true; });
 
 $("built").innerHTML = `Document tabs built ${esc(D.built)} by <b>dashboard/build_dashboard.py</b> from data/ and the workstreams' CSV outputs.`
-  + (KG ? ` Graph built ${esc(KG.built)} by <b>dashboard/build_explorer.py</b> from the Neo4j export: ${fmt(KG.nodes.length)} nodes and ${fmt(KG.edges.length / 3)} links. Genome annotation features are folded into protein → sequence links (${fmt(KG.neo4j.relationships)} relationships in Neo4j).` : "");
+  + (XLIVE ? ` The graph is read live from Neo4j by <b>filovirus serve</b>: ${fmt(Object.values(KG.neo4j.nodes).reduce((a, b) => a + b, 0))} nodes and ${fmt(KG.neo4j.relationships)} relationships, nothing left out.`
+  : KG ? ` Graph built ${esc(KG.built)} by <b>dashboard/build_explorer.py</b> from the Neo4j export: ${fmt(KG.nodes.length)} nodes and ${fmt(KG.edges.length / 3)} links. Genome annotation features are folded into protein → sequence links (${fmt(KG.neo4j.relationships)} relationships in Neo4j).` : "");
 applyFilters();
 route();
 </script>

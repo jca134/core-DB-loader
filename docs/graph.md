@@ -66,6 +66,15 @@ whole model at a glance, with every label and relationship type, run
 
 `filovirus serve` serves <http://localhost:8765>, on this computer only.
 
+**Explore the graph (free).** <http://localhost:8765/explore> is the research
+dashboard (`dashboard/`), with its graph explorer reading Neo4j live through
+`graph/explore.py`: search any record, see and export everything within 1–3
+steps of it. Unlike the published dashboard, which embeds a trimmed copy of the
+graph, it covers every node, Feature nodes included. Search runs over an
+in-memory list of every node, built on the first search (about 7 s) and rebuilt
+when the node count changes, i.e. after `filovirus export`; subgraphs are
+walked in Neo4j one step at a time (about 2 s for 30,000 nodes).
+
 **Pick a question (free).** The ready-made questions in `graph/templates.py`
 each have dropdown blanks. Every one is a fixed, reviewed Cypher query, and
 the dropdown values reach Neo4j only as query parameters. Picking "Ebola

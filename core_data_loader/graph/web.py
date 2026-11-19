@@ -1,8 +1,11 @@
 """
 The local query page: ready-made questions (free, always on) plus optional
-plain-English questions answered by Claude once an API key is set.
+plain-English questions answered by Claude once an API key is set. It also
+serves the research dashboard at /explore with its graph explorer reading the
+whole graph live from Neo4j (graph/explore.py), with no size limit and nothing
+left out, unlike the published dashboard's embedded copy.
 
-    filovirus serve            # http://localhost:8765
+    filovirus serve            # http://localhost:8765, explorer at /explore
 
 LOCAL ONLY. The server binds to 127.0.0.1 and answers only requests whose
 Host is localhost, and its POST endpoints accept only same-origin JSON.
@@ -22,6 +25,7 @@ from neo4j.exceptions import Neo4jError
 
 from core_data_loader.graph import api_key, review
 from core_data_loader.graph.ask import GUIDE, MODEL, Graph, ask
+from core_data_loader.graph.explore import LiveExplorer
 from core_data_loader.graph.templates import (
     OPTION_QUERIES,
     TEMPLATES,
@@ -53,6 +57,7 @@ class QueryApp:
         self.system = GUIDE + graph.schema()
         self.options = {kind: graph.run(q) for kind, q in OPTION_QUERIES.items()}
         self.options["virus"] = [{"value": k, "label": label} for k, label, _ in VIRUSES]
+        self.explorer = LiveExplorer(graph)
         self.client = None
         self.key_source = None
         key, source = api_key.current_key()
@@ -146,6 +151,7 @@ def make_handler(app: QueryApp, port: int):
         "/api/key": app.set_key, "/api/key/forget": app.forget_key,
         "/api/review/next": app.review_next, "/api/review": app.review_record,
         "/api/review/stats": app.review_stats,
+        "/api/explore/search": app.explorer.search, "/api/explore/subgraph": app.explorer.subgraph,
     }
 
     class Handler(BaseHTTPRequestHandler):
@@ -179,6 +185,11 @@ def make_handler(app: QueryApp, port: int):
                 return
             if self.path in ("/", "/index.html"):
                 self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            elif self.path == "/explore":
+                try:
+                    self._send(200, app.explorer.page(), "text/html; charset=utf-8")
+                except Neo4jError as e:
+                    self._json(500, {"error": f"Graph query failed: {e.message}. Is Neo4j running?"})
             elif self.path in get_routes:
                 self._call(get_routes[self.path])
             else:
@@ -219,6 +230,7 @@ def serve(port: int = 8765):
         server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app, port))
         ai = f"on (key from {app.key_source})" if app.client else "off until you add a key on the page"
         print(f"Query page: http://localhost:{port}   (plain-English AI questions: {ai})", flush=True)
+        print(f"Graph explorer, full live graph: http://localhost:{port}/explore", flush=True)
         print("Ctrl-C to stop.", flush=True)
         try:
             server.serve_forever()

@@ -31,6 +31,12 @@ uv run filovirus export     # (re)generate the graph in Neo4j from Postgres, ~20
 uv run filovirus serve      # then open http://localhost:8765
 ```
 
+`filovirus serve` also runs the research dashboard at
+<http://localhost:8765/explore>, with its graph explorer reading the **whole**
+graph live from Neo4j (all 189,897 nodes, genome-annotation features
+included). The published dashboard carries a trimmed copy instead; see
+[Research dashboard](#research-dashboard).
+
 Rerun `filovirus export` whenever the database changes, since the graph in
 Neo4j is a copy. `filovirus rebuild` loads, builds and exports in one go.
 
@@ -91,6 +97,12 @@ Anyone can rebuild the page from a fresh clone, without Neo4j:
   from `dashboard/snapshot/graph.json.gz`, a checked-in copy. Every build that
   reads Neo4j rewrites that file; commit it so everyone else gets the new graph.
 
+**Full graph, live:** the published page embeds a trimmed copy of the graph
+to fit the 16 MB artifact limit. For the whole graph, run `filovirus serve` and
+open <http://localhost:8765/explore>: the same page, but each search and
+subgraph is read from Neo4j as you go (`core_data_loader/graph/explore.py`),
+with nothing left out and no size limit.
+
 `build_explorer.py [page.html]` refreshes only the graph. It reads Neo4j (so run
 `filovirus export` first) and replaces the graph data inside an existing page,
 leaving the document tabs as they are. Use it after the database changes, or on
@@ -148,7 +160,7 @@ virtualenv is activated.
 | `graph-report` | the Neo4j graph's hubs, isolated nodes and degree per node type |
 | `review-stats` | precision of human-reviewed links, per confidence level (review on the query page) |
 | `export` | rebuild the Neo4j graph from `core.*` |
-| `serve` | the query page at <http://localhost:8765> |
+| `serve` | the query page at <http://localhost:8765>, and the dashboard with the full live graph at /explore |
 | `ask "QUESTION"` | one plain-English question in the terminal (needs an API key) |
 | `rebuild` | `load` + `build` + `export`: the usual refresh after data changes |
 
