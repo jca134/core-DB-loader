@@ -1,8 +1,9 @@
-import pandas as pd
 import re
 import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
+
+import pandas as pd
 
 PAPER_FILE = Path("filovirus_papers.csv")
 LINK_FILE = Path("data/processed/patent_paper_links.csv")

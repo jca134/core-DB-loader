@@ -1,5 +1,6 @@
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 
 INPUT = Path("data/processed/patent_paper_not_in_dataset.csv")
 

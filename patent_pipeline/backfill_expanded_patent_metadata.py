@@ -1,6 +1,7 @@
-import pandas as pd
 import re
 from pathlib import Path
+
+import pandas as pd
 
 EVIDENCE_FILE = Path("data/processed/patent_evidence_expanded.csv")
 RAW_FILE = Path("data/processed/all_patents_expanded.csv")

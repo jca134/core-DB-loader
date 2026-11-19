@@ -28,7 +28,6 @@ Usage:
 """
 
 import argparse
-import csv
 import math
 import random
 import re
@@ -38,10 +37,16 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
-from pathlib import Path
 
 from build_entity_edges import (
-    FACETS, HERE, TAXON_NODE, load_papers, load_vocabulary, match_text, read_csv, write_csv,
+    FACETS,
+    HERE,
+    TAXON_NODE,
+    load_papers,
+    load_vocabulary,
+    match_text,
+    read_csv,
+    write_csv,
 )
 
 EFETCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
@@ -237,8 +242,8 @@ def run_sample(args):
                          "confidence": e["confidence"], "context": ctx, "title": e["title"], "url": e["url"], "note": ""})
     REVIEW_PATH.parent.mkdir(parents=True, exist_ok=True)
     write_csv(REVIEW_PATH, rows, REVIEW_COLUMNS)
-    print(f"Wrote {len(rows)} grant edges to {REVIEW_PATH.relative_to(HERE)} "
-          f"({', '.join(f'{f} {sum(r['entity_type'] == f for r in rows)}' for f in FACETS)}).")
+    per_facet = ", ".join(f"{f} {sum(r['entity_type'] == f for r in rows)}" for f in FACETS)
+    print(f"Wrote {len(rows)} grant edges to {REVIEW_PATH.relative_to(HERE)} ({per_facet}).")
     print("Mark `correct` y if the [[bracketed]] text really refers to that entity, n if not, then run: "
           "python check_accuracy.py score")
 

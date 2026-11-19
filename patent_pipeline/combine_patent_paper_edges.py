@@ -1,5 +1,6 @@
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 
 OLD_MATCHES = Path(
     "data/processed/patent_paper_matches.csv"

@@ -1,8 +1,9 @@
+import re
+import time
+from pathlib import Path
+
 import pandas as pd
 import requests
-import time
-import re
-from pathlib import Path
 
 PAPER_FILE = Path("filovirus_papers.csv")
 PATENT_FILE = Path("data/processed/patent_evidence.csv")

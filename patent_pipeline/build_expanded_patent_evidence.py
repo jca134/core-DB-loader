@@ -1,6 +1,7 @@
-import pandas as pd
 import re
 from pathlib import Path
+
+import pandas as pd
 
 OLD_EVIDENCE = Path("data/processed/patent_evidence.csv")
 EXPANDED_RAW = Path("data/processed/all_patents_expanded.csv")

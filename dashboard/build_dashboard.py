@@ -58,11 +58,16 @@ TEMPLATE = HERE / "dashboard.template.html"
 OUT = HERE / "output" / "research_dashboard.html"
 
 sys.path[:0] = [str(REPO), str(GRANTS_WS), str(HERE)]
-from core_data_loader.etl.evidence import (  # noqa: E402
-    AWARD_SERIAL_RE, CONTRACT_IN_TEXT_RE, contract_targets, is_filovirus_paper,
-    normalize_document_id, parse_grant_numbers,
-)
 import build_entity_edges as matcher  # noqa: E402
+
+from core_data_loader.etl.evidence import (  # noqa: E402
+    AWARD_SERIAL_RE,
+    CONTRACT_IN_TEXT_RE,
+    contract_targets,
+    is_filovirus_paper,
+    normalize_document_id,
+    parse_grant_numbers,
+)
 
 # Shared filter vocabulary: index 0-2 viruses, 3-11 proteins.
 VIRUSES = ["Ebola viruses", "Marburg viruses", "Filovirus family"]

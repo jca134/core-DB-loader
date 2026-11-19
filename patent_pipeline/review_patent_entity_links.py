@@ -1,5 +1,6 @@
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 
 INPUT = Path(
     "data/processed/patent_entity_links_title_abstract_summary.csv"

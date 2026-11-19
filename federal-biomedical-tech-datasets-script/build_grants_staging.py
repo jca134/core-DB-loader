@@ -29,7 +29,12 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from fetch_nih_grants import (
-    CONTEXT_RE, HERE, build_term_groups, load_conditions, load_kg_terms, log,
+    CONTEXT_RE,
+    HERE,
+    build_term_groups,
+    load_conditions,
+    load_kg_terms,
+    log,
 )
 
 # Standard NIH core numbers: activity code + IC + 6-digit serial, e.g. R01AI123456, ZIAAI005079.

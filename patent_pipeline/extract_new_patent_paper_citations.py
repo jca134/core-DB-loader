@@ -1,9 +1,10 @@
-import pandas as pd
-import requests
 import re
 import time
-from bs4 import BeautifulSoup
 from pathlib import Path
+
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
 
 NEW_PATENTS_FILE = Path(
     "data/processed/new_patents_from_expansion.csv"

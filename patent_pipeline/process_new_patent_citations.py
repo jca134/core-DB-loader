@@ -1,8 +1,9 @@
-import pandas as pd
 import re
 import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
+
+import pandas as pd
 
 CITATION_FILE = Path(
     "data/processed/new_patent_paper_citations_raw.csv"

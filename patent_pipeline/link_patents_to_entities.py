@@ -1,6 +1,7 @@
-import pandas as pd
 import re
 from pathlib import Path
+
+import pandas as pd
 
 PATENT_FILE = Path(
     "data/processed/patent_evidence_with_abstracts.csv"
