@@ -35,7 +35,7 @@ uv run filovirus serve      # then open http://localhost:8765
 <http://localhost:8765/explore>, with its graph explorer reading the **whole**
 graph live from Neo4j (all 189,897 nodes, genome-annotation features
 included). The published dashboard carries a trimmed copy instead; see
-[Research dashboard](#research-dashboard).
+[Explore the full graph live](#explore-the-full-graph-live).
 
 Rerun `filovirus export` whenever the database changes, since the graph in
 Neo4j is a copy. `filovirus rebuild` loads, builds and exports in one go.
@@ -97,12 +97,6 @@ Anyone can rebuild the page from a fresh clone, without Neo4j:
   from `dashboard/snapshot/graph.json.gz`, a checked-in copy. Every build that
   reads Neo4j rewrites that file; commit it so everyone else gets the new graph.
 
-**Full graph, live:** the published page embeds a trimmed copy of the graph
-to fit the 16 MB artifact limit. For the whole graph, run `filovirus serve` and
-open <http://localhost:8765/explore>: the same page, but each search and
-subgraph is read from Neo4j as you go (`core_data_loader/graph/explore.py`),
-with nothing left out and no size limit.
-
 `build_explorer.py [page.html]` refreshes only the graph. It reads Neo4j (so run
 `filovirus export` first) and replaces the graph data inside an existing page,
 leaving the document tabs as they are. Use it after the database changes, or on
@@ -111,6 +105,32 @@ a downloaded copy of the published artifact. Without an argument it updates
 To fit under the artifact's 16 MB limit, it drops the 136k genome-annotation
 features (each protein links straight to its sequence instead) and trims
 properties; the Cypher export adds those features back.
+
+### Explore the full graph live
+
+The published page embeds a trimmed copy of the graph to fit the 16 MB
+artifact limit. To explore the whole graph instead, run the same page locally
+against Neo4j (`core_data_loader/graph/explore.py`), with nothing left out and
+no size limit:
+
+1. Make sure Neo4j is running: `brew services start neo4j`. If the database
+   has changed since the last export, also run `uv run filovirus export`.
+2. Start the server from the project folder and leave that terminal open:
+   ```bash
+   uv run filovirus serve
+   ```
+3. Open <http://localhost:8765/explore> in your browser.
+
+- The page opens on **Explore the graph**. The line under the search box should
+  read "Live from Neo4j: the full graph, …": that's how you know you're on the
+  live version, not the published copy.
+- The first search takes about 7 seconds while the server lists every node.
+  After that, searches are instant and subgraphs load in a second or two.
+- After a new `filovirus export`, the page picks up the new graph by itself; no
+  restart needed.
+- Everything else works as on the published page: the by-type view,
+  double-clicking a circle to split it, "Explore from here", and the exports.
+- Stop the server with Ctrl-C in its terminal.
 
 ## First-time setup
 
