@@ -115,7 +115,7 @@ Scoring"), which is what `confidence` on `RELATED`, `CITES`, `CLAIMS` and
 The subgraph explorer (`filovirus serve`, /explore, and the dashboard copy)
 applies that neighbor scoring to what it shows. The starting record passes on
 all its links; every record reached after it passes on only its best N links
-not already walked ("Links followed per record", default 25, or All), ranked
+not already walked ("Links followed per record": all by default, or the best 5 to 250), ranked
 by edge confidence and then by the neighbor's degree. Only inferred links
 (`RELATED`, `CLAIMS`) have confidences below 1; a curated link with no
 `confidence` is a recorded fact and counts as 1.0. Without it, two steps
