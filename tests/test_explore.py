@@ -17,6 +17,7 @@ class FakeGraph:
         self.nodes = nodes      # element id -> (label, properties)
         self.edges = edges      # (source id, type, target id)
         self.calls = 0
+        self.confidence = {}    # frozenset({a, b}) -> edge confidence
 
     def _deg(self, i):
         return sum((a == i) + (b == i) for a, _, b in self.edges)
@@ -38,9 +39,9 @@ class FakeGraph:
                         found.add(a)
                         todo.append(a)
             return [{"c": c} for c in found]
-        if "MATCH (n)--(m)" in cypher:
-            out = {b for a, _, b in self.edges if a in ids} | {a for a, _, b in self.edges if b in ids}
-            return [{"m": m} for m in out]
+        if "MATCH (n)-[e]-(m)" in cypher:
+            out = {(a, b) for a, _, b in self.edges if a in ids} | {(b, a) for a, _, b in self.edges if b in ids}
+            return [{"n": n, "m": m, "c": self.confidence.get(frozenset((n, m)), 0.0)} for n, m in out]
         if "MATCH (a)-[e]->(b)" in cypher:
             return [{"a": a, "t": t, "b": b, "c": None, "m": None, "sc": None} for a, t, b in self.edges if a in ids]
         raise AssertionError(f"unexpected query: {cypher}")
@@ -106,6 +107,20 @@ class TestSubgraph:
         r = LiveExplorer(graph()).subgraph({"taxa": [100], "hops": 1, "subtaxa": True})
         assert set(r["ids"]) == {"t1", "t2", "i"}      # the strain's isolate is one step from the sub-taxon
         assert [r["ids"][k] for k in r["starts"]] == ["t1"]
+
+    def test_records_past_the_start_pass_on_only_their_best_links(self):
+        g = graph()
+        for k in range(5):      # the gene family becomes a hub: five more proteins point to it
+            g.nodes[f"q{k}"] = ("Protein", {"protein_id": 10 + k, "name": f"VP35 {k}"})
+            g.edges.append((f"q{k}", "IN_FAMILY", "f"))
+        g.confidence[frozenset(("q3", "f"))] = 0.9
+        r = LiveExplorer(g).subgraph({"ids": ["g"], "hops": 2, "per": 2})
+        # the start passes on all its links (the family and the antibody); the family passes on
+        # its best two of six: q3 by confidence, then one more
+        assert len(r["ids"]) == 1 + 2 + 2
+        assert "q3" in r["ids"]
+        assert r["limited"] == {r["ids"].index("f"): (2, 7)}
+        assert len(LiveExplorer(g).subgraph({"ids": ["g"], "hops": 2})["ids"]) == 9
 
     def test_unknown_start_is_an_error_not_an_empty_graph(self):
         assert "error" in LiveExplorer(graph()).subgraph({"ids": ["gone"], "hops": 2})

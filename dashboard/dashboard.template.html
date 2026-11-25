@@ -342,6 +342,9 @@ code { font-family: var(--font-mono); font-size: .92em; background: var(--chip);
       <label class="field">Steps out
         <select id="x-hops"><option value="1">1 step</option><option value="2" selected>2 steps</option><option value="3">3 steps</option></select>
       </label>
+      <label class="field">Links followed per record
+        <select id="x-per" title="Past the starting record, each record passes on only its best links, ranked by edge confidence (SerenQA's neighbor scoring). The graph itself keeps every link."><option value="5">Best 5</option><option value="10">Best 10</option><option value="25" selected>Best 25</option><option value="50">Best 50</option><option value="100">Best 100</option><option value="250">Best 250</option><option value="0">All links</option></select>
+      </label>
       <label class="x-check"><input type="checkbox" id="x-sub" checked> Include sub-taxa and strains of a virus</label>
       <div class="x-groups" id="x-groups" role="group" aria-label="Node types to include"></div>
     </div>
@@ -540,7 +543,7 @@ code { font-family: var(--font-mono); font-size: .92em; background: var(--chip);
   <footer>
     <div><b>Sources.</b> Grants: NIH RePORTER projects and publications (federal-biomedical-tech-datasets-script). Papers: the papers workstream's bundle, and PubMed records of grant-cited and patent-cited papers, with their grant lists and reference lists. Patents: USPTO Patent Public Search and Google Patents, including each patent's government-interest statement and citation tables (patent_pipeline, filovirus fetch patent-details).</div>
     <div><b>Grant years</b> are the project start and end dates. 106 grants have none in RePORTER, so their first and last fiscal year in the pull is used (marked “fiscal years” in the Grants table).</div>
-    <div><b>Explore the graph</b> uses the knowledge graph itself (Postgres core.* exported to Neo4j): taxa, isolates, sequences, proteins, gene families, structures, epitopes and assays, antibodies, countermeasures, clinical studies, and the same grants, papers and patents. A step is one relationship in either direction, and every node is walked through, however many links it has: SerenQA scores paths through highly connected nodes rather than cutting them, and some of them (each gene family, which every protein of every filovirus points to) are the bridges between viruses. That makes subgraphs grow fast; three steps from most records reaches much of the graph.</div>
+    <div><b>Explore the graph</b> uses the knowledge graph itself (Postgres core.* exported to Neo4j): taxa, isolates, sequences, proteins, gene families, structures, epitopes and assays, antibodies, countermeasures, clinical studies, and the same grants, papers and patents. A step is one relationship in either direction. Every node is walked through, however many links it has, since some highly connected ones (each gene family, which every protein of every filovirus points to) are the bridges between viruses. But past the starting record, each record passes on only its best links (25 by default, set by “Links followed per record”), ranked by edge confidence and then by how connected the neighbor is. That is SerenQA's neighbor scoring (Appendix D.3), which limits what it shows the LLM the same way; without it, two steps from almost anything runs through a hub and reaches most of the graph. The graph itself keeps every link.</div>
     <div><b>Viruses and proteins</b> come from each workstream's own keyword matching against the knowledge graph vocabulary (kg_keywords.csv), mapped onto one list here: Ebola viruses, Marburg viruses, the filovirus family named generally, and the nine filovirus proteins. Patent matches are candidates; some are flagged for review.</div>
     <div id="built"></div>
   </footer>
@@ -1094,11 +1097,12 @@ async function xFetch() {
   $("x-seedkind").textContent = seed.kind; $("x-seedname").textContent = seed.name;
   $("x-seednote").textContent = "Loading from Neo4j…";
   try {
-    const r = await xApi("/api/explore/subgraph", { ids: seed.ids, taxa: seed.taxa, hops: +$("x-hops").value, subtaxa: $("x-sub").checked });
+    const r = await xApi("/api/explore/subgraph", { ids: seed.ids, taxa: seed.taxa, hops: +$("x-hops").value, per: +$("x-per").value, subtaxa: $("x-sub").checked });
     if (seq !== xFetchSeq) return;   // a newer request replaced this one
     Object.assign(KG, { ids: r.ids, nodes: r.nodes, edges: r.edges, eprops: r.eprops, rels: r.rels, deg: r.deg });
     X = xIndex();
     seed.nodes = r.starts;
+    xs.limited = new Map(Object.entries(r.limited || {}).map(([i, v]) => [+i, v]));
     xs.pos = null; xs.sel = seed.nodes[0] ?? null; xs.selType = null;
     xBuild();
   } catch (e) {
@@ -1137,15 +1141,30 @@ function xBuild() {
     }
   }
   roots.forEach((r) => hop.set(r, 0));
+  // Past the start, each record passes on only its `per` best links (edge confidence, then the
+  // neighbor's links), as SerenQA's neighbor scoring does; otherwise step 2 runs through a hub
+  // with thousands of links. Live, the server has already done this (xs.limited).
+  const per = XLIVE ? 0 : +$("x-per").value, limited = XLIVE ? (xs.limited || new Map()) : new Map();
+  const conf = (e) => { const ep = KG.eprops[e]; return ep && ep[0] != null ? ep[0] : 0; };
   let frontier = roots;
   for (let d = 1; d <= hops && frontier.length; d++) {
     const next = [];
     for (const u of frontier) {
+      let cand = [];
       for (let k = X.off[u]; k < X.off[u + 1]; k++) {
         const v = X.nb[k];
         if (hop.has(v) || !xs.on[X.grp[v]]) continue;
-        hop.set(v, d); next.push(v);
+        cand.push([conf(X.ne[k]), X.deg[v], v]);
       }
+      if (per && d > 1) {
+        const best = new Map();   // one entry per neighbor, with its best link
+        for (const c of cand) if (!best.has(c[2]) || best.get(c[2])[0] < c[0]) best.set(c[2], c);
+        if (best.size > per) {
+          cand = [...best.values()].sort((a, b) => b[0] - a[0] || b[1] - a[1]).slice(0, per);
+          limited.set(u, [per, X.deg[u]]);
+        }
+      }
+      for (const [, , v] of cand) if (!hop.has(v)) { hop.set(v, d); next.push(v); }
     }
     frontier = next;
   }
@@ -1157,18 +1176,18 @@ function xBuild() {
     if (!hop.has(v)) continue;
     edges.push(e); sdeg.set(u, (sdeg.get(u) || 0) + 1); sdeg.set(v, (sdeg.get(v) || 0) + 1);
   }
-  xs.sub = { nodes, edges, hop, sdeg, hops, roots: new Set(roots) };
+  xs.sub = { nodes, edges, hop, sdeg, hops, limited, roots: new Set(roots) };
   if (xs.sel !== null && !hop.has(xs.sel)) xs.sel = roots[0] ?? null;
   xRenderSummary(); xRenderTable(); xRenderDetail(); xLayout();
 }
 
 function xRenderSummary() {
-  const { nodes, edges, hops, roots } = xs.sub, seed = xs.seed;
+  const { nodes, edges, hops, roots, limited } = xs.sub, seed = xs.seed;
   $("x-seedkind").textContent = seed.kind;
   $("x-seedname").textContent = seed.name;
   const extra = roots.size > seed.nodes.length ? ` Starts from ${fmt(roots.size)} taxa: the ${seed.nodes.length > 1 ? `${seed.nodes.length} roots` : "root"} and every sub-taxon and strain under it.` : "";
   const share = nodes.length / X.N;
-  $("x-seednote").textContent = `Everything within ${hops} step${hops > 1 ? "s" : ""} of it in the knowledge graph.${extra}${share >= 0.2 ? ` That's ${Math.round(share * 100)}% of the whole graph; fewer steps give a more specific picture.` : ""}`;
+  $("x-seednote").textContent = `Everything within ${hops} step${hops > 1 ? "s" : ""} of it in the knowledge graph${limited.size ? `, where ${fmt(limited.size)} record${limited.size > 1 ? "s" : ""} with many links passed on only their best ${fmt(+$("x-per").value)}, by edge confidence` : ""}.${extra}${share >= 0.2 ? ` That's ${Math.round(share * 100)}% of the whole graph; fewer steps or fewer links per record give a more specific picture.` : ""}`;
   const types = new Set(nodes.map((i) => KG.nodes[i][0]));
   const docs = nodes.filter((i) => X.grp[i] >= 4 && X.grp[i] <= 6).length;
   tiles($("x-tiles"), [
@@ -1194,7 +1213,7 @@ function xRenderTable() {
   const total = rows.length; rows = rows.slice(0, xs.shown);
   $("x-table").innerHTML = total ? `<div class="table-wrap"><table class="data"><thead><tr><th>Type</th><th>Name</th><th>ID</th><th>Steps</th><th>Links here / total</th></tr></thead><tbody>${rows.map((i) => `
     <tr class="x-row" data-i="${i}" aria-selected="${i === xs.sel}" tabindex="0"><td><span class="x-kind">${dot(X.grp[i])}${esc(lname(X.lab(i)))}</span></td>
-    <td>${esc(KG.nodes[i][2])}</td>
+    <td>${esc(KG.nodes[i][2])}${xs.sub.limited.has(i) ? ` <span class="chip">best ${fmt(xs.sub.limited.get(i)[0])} links followed</span>` : ""}</td>
     <td class="num">${esc(keyProp(i))} ${esc(KG.nodes[i][1])}</td><td class="num">${hop.get(i)}</td>
     <td class="num">${fmt(sdeg.get(i) || 0)} / ${fmt(X.deg[i])}</td></tr>`).join("")}</tbody></table></div>
     ${total > rows.length ? `<div class="more"><button class="btn" type="button" id="x-more">Show more (${fmt(total - rows.length)} left)</button></div>` : ""}`
@@ -1235,7 +1254,7 @@ function xRenderDetail() {
     <span class="x-kind">${dot(X.grp[i])}${esc(lname(X.lab(i)))}</span>
     <p class="x-name">${esc(n[2])}</p>
     <dl class="x-props"><dt>${esc(keyProp(i))}</dt><dd>${esc(n[1])}</dd>${props}${n[4] ? `<dt>also</dt><dd>${esc(n[4])}</dd>` : ""}</dl>
-    <p class="note">${fmt(X.deg[i])} links in the graph · ${fmt(sdeg.get(i) || 0)} in this subgraph · ${hop.get(i)} step${hop.get(i) === 1 ? "" : "s"} from the start</p>
+    <p class="note">${fmt(X.deg[i])} links in the graph · ${fmt(sdeg.get(i) || 0)} in this subgraph · ${hop.get(i)} step${hop.get(i) === 1 ? "" : "s"} from the start${xs.sub.limited.has(i) ? ` · only its best ${fmt(xs.sub.limited.get(i)[0])} links followed` : ""}</p>
     <div class="x-acts">${xs.sub.roots.has(i) && xs.seed.nodes.length === 1 ? "" : `<button class="btn primary" type="button" id="x-from">Explore from here</button>`}
       ${lk ? `<a class="btn" href="${esc(lk[0])}" target="_blank" rel="noopener">Open in ${esc(lk[1])} ↗</a>` : ""}
       ${xs.mode === "type" && typeKey === "t" + li ? `<button class="btn" type="button" data-type="${li}">All ${esc(xPlural(li))}</button>` : ""}
@@ -1556,7 +1575,7 @@ function xExportJSON() {
   const { nodes, edges, hop, hops } = xs.sub;
   return JSON.stringify({
     seed: { kind: xs.seed.kind, name: xs.seed.name, ids: xs.seed.nodes.map(nodeId) },
-    settings: { steps: hops, include_subtaxa: $("x-sub").checked, types: XGROUPS.filter((g, gi) => xs.on[gi]).map((g) => g[1]) },
+    settings: { steps: hops, links_followed_per_record: +$("x-per").value || "all", include_subtaxa: $("x-sub").checked, types: XGROUPS.filter((g, gi) => xs.on[gi]).map((g) => g[1]) },
     graph_built: KG.built,
     nodes: nodes.map((i) => ({ id: nodeId(i), label: X.lab(i), key_property: keyProp(i), key: KG.nodes[i][1], name: KG.nodes[i][2], steps: hop.get(i), properties: KG.nodes[i][3] || {} })),
     links: edges.map((e) => { const r = xEdgeRow(e); const o = { source: nodeId(r.a), target: nodeId(r.b), type: r.type }; if (r.confidence !== null || r.matched_terms) Object.assign(o, { confidence: r.confidence, matched_terms: r.matched_terms, support_count: r.support_count }); return o; }),
@@ -1686,7 +1705,7 @@ function xInit() {
   });
   q.addEventListener("blur", () => setTimeout(() => { xSugItems = []; xRenderSug(); }, 150));
   $("x-sug").addEventListener("mousedown", (e) => { const li = e.target.closest("[data-k]"); if (li) { e.preventDefault(); xPick(xSugItems[+li.dataset.k]); } });
-  for (const id of ["x-hops", "x-sub"]) $(id).addEventListener("change", () => xs.seed && (XLIVE ? xFetch() : xBuild()));
+  for (const id of ["x-hops", "x-per", "x-sub"]) $(id).addEventListener("change", () => xs.seed && (XLIVE ? xFetch() : xBuild()));
   $("x-groups").addEventListener("click", (e) => { const b = e.target.closest("[data-g]"); if (!b) return; const g = +b.dataset.g; xs.on[g] = !xs.on[g]; b.setAttribute("aria-pressed", xs.on[g]); xBuild(); });
   $("x-tgroup").addEventListener("change", () => { xs.shown = 50; xRenderTable(); });
   $("x-tq").addEventListener("input", () => { xs.shown = 50; xRenderTable(); });

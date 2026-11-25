@@ -200,15 +200,32 @@ class LiveExplorer:
             rows = self._batched("UNWIND $ids AS id MATCH (t:Taxon) WHERE elementId(t) = id "
                                  "MATCH (c:Taxon)-[:CHILD_OF*1..]->(t) RETURN DISTINCT elementId(c) AS c", roots)
             roots += [r["c"] for r in rows if r["c"] not in roots]
+        # Links followed per record past the start (0: all). The start records pass on every link;
+        # each record reached after that passes on only its `per` best links not already walked,
+        # ranked by edge confidence and then by the neighbor's links, as SerenQA's neighbor
+        # scoring does (Appendix D.3). Without it, step 2 runs through a gene family or a virus
+        # with thousands of links and reaches most of the graph.
+        per = max(0, int(body.get("per") or 0))
         hop = {i: 0 for i in roots}
+        limited = {}            # element id -> (links followed, links it has)
         frontier = roots
         for d in range(1, hops + 1):
-            nxt = []
+            cand = {}
             for r in self._batched("UNWIND $ids AS id MATCH (n) WHERE elementId(n) = id "
-                                   "MATCH (n)--(m) RETURN DISTINCT elementId(m) AS m", frontier):
-                if r["m"] not in hop:
-                    hop[r["m"]] = d
-                    nxt.append(r["m"])
+                                   "MATCH (n)-[e]-(m) RETURN id AS n, elementId(m) AS m, "
+                                   "max(coalesce(e.confidence, 0.0)) AS c", frontier):
+                if r["m"] not in hop and r["m"] in by_id:
+                    cand.setdefault(r["n"], []).append((r["c"], by_id[r["m"]][3], r["m"]))
+            nxt = []
+            for n in frontier:      # frontier order, so the walk doesn't depend on Neo4j's row order
+                ms = cand.get(n, [])
+                if per and d > 1 and len(ms) > per:
+                    ms = sorted(ms, reverse=True)[:per]
+                    limited[n] = (per, by_id[n][3])
+                for _, _, m in ms:
+                    if m not in hop:
+                        hop[m] = d
+                        nxt.append(m)
             frontier = nxt
         ids = list(hop)
         index = {i: k for k, i in enumerate(ids)}
@@ -229,6 +246,7 @@ class LiveExplorer:
             "ids": ids, "nodes": [by_id[i][1] for i in ids], "deg": [by_id[i][3] for i in ids],
             "edges": edges, "eprops": eprops, "rels": rels,
             "starts": [index[i] for i in dict.fromkeys(starts)],
+            "limited": {index[i]: v for i, v in limited.items()},
         }
 
     # --- the page ---

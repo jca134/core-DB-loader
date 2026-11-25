@@ -110,8 +110,16 @@ each neighbor, and Novelty and Surprise are computed from those
 probabilities. Where a hub has too many neighbors to show the LLM, it ranks
 them by edge confidence and passes on the best ones (Appendix D.3, "Neighbor
 Scoring"), which is what `confidence` on `RELATED`, `CITES`, `CLAIMS` and
-`DESCRIBES` is for. So the graph keeps every hub, and so does the dashboard's
-subgraph explorer.
+`DESCRIBES` is for. So the graph keeps every hub and every link.
+
+The subgraph explorer (`filovirus serve`, /explore, and the dashboard copy)
+applies that neighbor scoring to what it shows. The starting record passes on
+all its links; every record reached after it passes on only its best N links
+not already walked ("Links followed per record", default 25, or All), ranked
+by edge confidence and then by the neighbor's degree. Without it, two steps
+from a protein reach 3,700-9,400 nodes through its gene family; with 25, 29.
+Records that were limited are marked in the table. This is a viewing limit
+only; it doesn't change the graph or anything scored from it.
 
 ## Safety
 
