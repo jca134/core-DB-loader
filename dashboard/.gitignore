@@ -1,4 +1,0 @@
-# The built page (~10 MB, mostly the embedded graph). It isn't committed: anyone can
-# rebuild it from a fresh clone with python dashboard/build_dashboard.py, and the
-# published Claude artifact is the copy to share.
-output/

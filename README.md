@@ -67,9 +67,10 @@ uv run filovirus serve      # leave this terminal open; Ctrl-C stops it
 ```
 
 Then open **<http://localhost:8765/explore>**. It reads the **whole** graph live
-from Neo4j (189,897 nodes, genome-annotation features included). The line under
-the search box reads "Live from Neo4j: the full graph, …" when you're on the
-live version.
+from Neo4j (189,897 nodes, genome-annotation features included). The document
+tabs are built from input files that are in git (`data/` and
+`federal-biomedical-tech-datasets-script/output/`; the root `.gitignore` lists
+the exceptions), by `dashboard/documents.py`.
 
 - **Search** for any virus, protein, gene, epitope, antibody, countermeasure,
   grant, paper or patent, and see everything within 1–3 steps of it.
@@ -103,30 +104,6 @@ new `filovirus export`, the search picks up the new graph by itself; restart
   `neo4j`, password `filovirus`). `CALL db.schema.visualization();` draws every
   node type with the relationships between them; for real data, try
   `MATCH (g:Gene {gene_symbol: 'GP'})<-[r]-(n) RETURN g, r, n LIMIT 50`.
-
-## Published dashboard (static copy)
-
-The same page can also be built as one self-contained file,
-`dashboard/output/research_dashboard.html` (git-ignored), which opens in any
-browser and is published as a Claude artifact. To fit the artifact's 16 MB
-limit, it embeds a trimmed copy of the graph: the 136k genome-annotation
-features are dropped (each protein links straight to its sequence instead) and
-properties are trimmed. The Cypher export adds those features back.
-
-```bash
-uv run python dashboard/build_dashboard.py   # the whole page; works from a fresh clone
-uv run python dashboard/build_explorer.py    # graph only, into an already built page
-```
-
-- The document tabs are built from input files that are in git (`data/` and
-  `federal-biomedical-tech-datasets-script/output/`; the root `.gitignore`
-  lists the exceptions).
-- The graph is read from Neo4j when it's running, and otherwise from
-  `dashboard/snapshot/graph.json.gz`, a checked-in copy. A build that reads
-  Neo4j rewrites that file; commit it when the graph has changed.
-- `build_explorer.py [page.html]` replaces only the graph inside an existing
-  page (by default `dashboard/output/research_dashboard.html`), for example
-  after the database changes or on a downloaded copy of the artifact.
 
 ## Commands
 
@@ -175,7 +152,7 @@ core_data_loader/
 ├── fetchers/       NIH RePORTER / PubMed lookups → data/     (filovirus fetch)
 ├── etl/            raw.* → core.*, run in order by pipeline.py   (filovirus build)
 └── graph/          Neo4j export, live explorer and its web server, `filovirus ask`
-dashboard/          research dashboard: template, builders (build_dashboard.py, build_explorer.py), graph snapshot
+dashboard/          the dashboard page (dashboard.template.html) and its document tabs' data (documents.py)
 sql/                schema DDL (01–10) and the data-quality checks (checks.sql)
 tests/              unit tests: pure logic only, no database needed
 docs/               the documentation above

@@ -1,7 +1,7 @@
 """
 The research dashboard, served locally with its graph explorer reading the
 whole graph live from Neo4j (graph/explore.py): no size limit and nothing left
-out, unlike the published dashboard's embedded copy.
+out.
 
     filovirus serve            # http://localhost:8765/explore
 
@@ -51,6 +51,10 @@ def make_handler(explorer: LiveExplorer, port: int):
             if self.path in ("/", "/index.html"):
                 self.send_response(302)
                 self.send_header("Location", "/explore")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            elif self.path == "/favicon.ico":
+                self.send_response(204)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
             elif self.path == "/explore":

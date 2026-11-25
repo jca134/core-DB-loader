@@ -18,7 +18,7 @@ overview/
 # Someone else's RDF export work-in-progress; not part of the pipeline.
 exports/
 
-# Exception: the inputs dashboard/build_dashboard.py reads, so teammates can build
+# Exception: the inputs dashboard/documents.py reads, so teammates can serve
 # the dashboard from a fresh clone. `data/` became `data/**` above because git
 # cannot re-include a file inside an ignored folder.
 !data/**/

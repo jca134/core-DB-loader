@@ -6,7 +6,7 @@ output/**
 !Context/Context/kg_keywords.csv
 !review/grant_edge_review.csv
 
-# Exception: outputs dashboard/build_dashboard.py reads (see the root .gitignore).
+# Exception: outputs dashboard/documents.py reads (see the root .gitignore).
 !output/**/
 !output/entity_links/paper_entity_edges.csv
 !output/grants/staging/stg_grant_award.csv

@@ -1,10 +1,8 @@
-#!/usr/bin/env python3
-"""Build the research dashboard (dashboard/output/research_dashboard.html).
+"""The dashboard's document tabs: grants, papers, patents, and each pair of them.
 
-One page. The first tab, "Explore the graph", searches the whole knowledge graph
-and exports the subgraph around any record; its data comes from Neo4j through
-build_explorer.py (see there). The other tabs cover each document collection
-(grants, papers, patents) and each pair of them. Their inputs:
+`filovirus serve` (core_data_loader/graph/explore.py) calls document_data() and
+embeds the result in dashboard.template.html in place of /*__DATA__*/null; the
+first tab, "Explore the graph", reads Neo4j live instead. The inputs:
 
   data/      the shared source folder (docs/data-sources.md; FILOVIRUS_DATA_DIR
              overrides it): RePORTER publication lists, the PubMed records of
@@ -28,17 +26,9 @@ matched yet are found with the grants workstream's own matcher
 Every source keeps its own virus and protein matching. This script only maps the
 names onto one shared list (Ebola / Marburg / filovirus family, and the nine
 filovirus proteins), so one filter can apply to every tab.
-
-The data is embedded in dashboard.template.html in place of /*__DATA__*/null, the
-same way federal-biomedical-tech-datasets-script/build_links_page.py works.
-
-Usage:
-
-  python dashboard/build_dashboard.py
 """
 
 import csv
-import json
 import os
 import re
 import sys
@@ -54,8 +44,6 @@ DATA = Path(os.environ.get("FILOVIRUS_DATA_DIR") or REPO / "data")
 GRANTS_WS = REPO / "federal-biomedical-tech-datasets-script"
 GRANTS_OUT = GRANTS_WS / "output"
 PATENT_WS = REPO / "patent_pipeline" / "data" / "processed"
-TEMPLATE = HERE / "dashboard.template.html"
-OUT = HERE / "output" / "research_dashboard.html"
 
 sys.path[:0] = [str(REPO), str(GRANTS_WS), str(HERE)]
 import build_entity_edges as matcher  # noqa: E402
@@ -496,31 +484,3 @@ def document_data() -> dict:
         print("  names not mapped to a virus or protein:", dict(unmapped.most_common(15)), file=sys.stderr)
     return data
 
-
-def main():
-    import build_explorer
-
-    data = document_data()
-
-    # Explore tab: from Neo4j when it's running (and the checked-in snapshot is
-    # refreshed), otherwise from that snapshot, so a fresh clone needs no Neo4j.
-    try:
-        graph = build_explorer.graph_data()
-        build_explorer.write_snapshot(build_explorer.SNAPSHOT, graph)
-        print(f"  saved {build_explorer.SNAPSHOT.relative_to(REPO)} (commit it so anyone can rebuild the page)")
-    except Exception as e:  # noqa: BLE001 -- any Neo4j failure means: use the snapshot
-        graph = build_explorer.read_snapshot(build_explorer.SNAPSHOT)
-        print(f"Graph: Neo4j not reachable ({type(e).__name__}), so using "
-              f"{build_explorer.SNAPSHOT.relative_to(REPO)} (built {graph['built']})")
-
-    html = TEMPLATE.read_text(encoding="utf-8").replace(
-        "/*__DATA__*/null", json.dumps(data, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/"))
-    html = build_explorer.embed(html, graph)
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(html, encoding="utf-8")
-    print(f"Wrote {OUT.relative_to(REPO)} ({len(html.encode()) / 2**20:.1f} MB)")
-    print(build_explorer.summary(graph))
-
-
-if __name__ == "__main__":
-    main()

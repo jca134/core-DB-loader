@@ -65,11 +65,10 @@ whole model at a glance, with every label and relationship type, run
 ## The dashboard
 
 `filovirus serve` serves <http://localhost:8765/explore>, on this computer
-only. It is the research
-dashboard (`dashboard/`), with its graph explorer reading Neo4j live through
-`graph/explore.py`: search any record, see and export everything within 1–3
-steps of it. Unlike the published dashboard, which embeds a trimmed copy of the
-graph, it covers every node, Feature nodes included. Search runs over an
+only. It is the research dashboard (`dashboard/`), with its graph explorer
+reading Neo4j live through `graph/explore.py`: search any record, see and export
+everything within 1–3 steps of it, across every node, Feature nodes included.
+Search runs over an
 in-memory list of every node, built on the first search (about 7 s) and rebuilt
 when the node count changes, i.e. after `filovirus export`; subgraphs are
 walked in Neo4j one step at a time (about 2 s for 30,000 nodes). Picking
@@ -103,7 +102,7 @@ them by edge confidence and passes on the best ones (Appendix D.3, "Neighbor
 Scoring"), which is what `confidence` on `RELATED`, `CITES`, `CLAIMS` and
 `DESCRIBES` is for. So the graph keeps every hub and every link.
 
-The subgraph explorer (`filovirus serve`, /explore, and the dashboard copy)
+The subgraph explorer (`filovirus serve`, /explore)
 applies that neighbor scoring to what it shows. The starting record passes on
 all its links; every record reached after it passes on only its best N links
 not already walked ("Links followed per record": all by default, or the best 5 to 250), ranked

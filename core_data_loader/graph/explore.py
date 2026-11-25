@@ -1,12 +1,11 @@
 """
-The graph explorer's data: the record format shared by the dashboard (which
-embeds a trimmed copy of the graph, dashboard/build_explorer.py) and the live
-explorer behind `filovirus serve` at /explore (LiveExplorer below), which reads
-the whole graph from Neo4j on every request, Feature nodes included.
+The graph explorer behind `filovirus serve` at /explore (LiveExplorer below),
+which reads the whole graph from Neo4j, Feature nodes included, and the page it
+serves (dashboard/dashboard.template.html).
 
 A record is a compact list: [label index, key, display name, {shown properties}
-or 0, "searchable ids | ..."]. Labels are indexed in LABEL_KEY order, so both
-sources agree on what index means what.
+or 0, "searchable ids | ..."]. Labels are indexed in LABEL_KEY order, so the
+server and the page agree on what index means what.
 """
 
 import importlib.util
@@ -282,11 +281,11 @@ class LiveExplorer:
 
 
 def _documents_json() -> str:
-    """The document tabs' data, built by dashboard/build_dashboard.py from the tracked inputs."""
-    path = ROOT / "dashboard" / "build_dashboard.py"
-    spec = importlib.util.spec_from_file_location("build_dashboard", path)
+    """The document tabs' data, built by dashboard/documents.py from the tracked inputs."""
+    path = ROOT / "dashboard" / "documents.py"
+    spec = importlib.util.spec_from_file_location("dashboard_documents", path)
     module = importlib.util.module_from_spec(spec)
-    sys.modules.setdefault("build_dashboard", module)
+    sys.modules.setdefault("dashboard_documents", module)
     spec.loader.exec_module(module)
     data = module.document_data()
     return json.dumps(data, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
