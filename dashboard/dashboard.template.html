@@ -1186,7 +1186,9 @@ function xRenderSummary() {
   $("x-seedkind").textContent = seed.kind;
   $("x-seedname").textContent = seed.name;
   const extra = roots.size > seed.nodes.length ? ` Starts from ${fmt(roots.size)} taxa: the ${seed.nodes.length > 1 ? `${seed.nodes.length} roots` : "root"} and every sub-taxon and strain under it.` : "";
-  const share = nodes.length / X.N;
+  // Live, X holds only the fetched subgraph, so the whole graph's size comes from Neo4j's counts.
+  const total = XLIVE ? Object.values(KG.neo4j.nodes).reduce((a, b) => a + b, 0) : X.N;
+  const share = nodes.length / total;
   $("x-seednote").textContent = `Everything within ${hops} step${hops > 1 ? "s" : ""} of it in the knowledge graph${limited.size ? `, where ${fmt(limited.size)} record${limited.size > 1 ? "s" : ""} with many links passed on only their best ${fmt(+$("x-per").value)}, by edge confidence` : ""}.${extra}${share >= 0.2 ? ` That's ${Math.round(share * 100)}% of the whole graph; fewer steps or fewer links per record give a more specific picture.` : ""}`;
   const types = new Set(nodes.map((i) => KG.nodes[i][0]));
   const docs = nodes.filter((i) => X.grp[i] >= 4 && X.grp[i] <= 6).length;
