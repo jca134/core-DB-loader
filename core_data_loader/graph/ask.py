@@ -2,7 +2,6 @@
 Ask the filovirus knowledge graph a question in plain English.
 
     filovirus ask "Which antibodies target GP?"
-    filovirus serve          # the query page, http://localhost:8765
 
 Claude translates the question into Cypher, runs it against the Neo4j copy of
 the database (`filovirus export`), reads the rows, refines
@@ -15,8 +14,8 @@ generated `DELETE` fails instead of damaging the graph (and the graph is a
 rebuildable copy of Postgres anyway). Each query has a time limit and its
 result is capped before it goes back to the model.
 
-Needs an Anthropic API key: ANTHROPIC_API_KEY, or one saved from the query
-page (see api_key.py). The page's ready-made questions need no key at all.
+Needs an Anthropic API key: ANTHROPIC_API_KEY, or one saved earlier in
+~/.config/filovirus-graph/ (see api_key.py).
 """
 
 import argparse
@@ -192,7 +191,7 @@ def ask(question: str, graph: Graph, client: anthropic.Anthropic, system: str) -
 
 
 # ---------------------------------------------------------------------------
-# Command line (the query page is graph/web.py)
+# Command line
 # ---------------------------------------------------------------------------
 
 def schema_prompt() -> str:
@@ -208,7 +207,7 @@ def ask_cli(question: str) -> int:
     """Answer one question in the terminal. Returns an exit code."""
     key, _source = api_key.current_key()
     if not key:
-        print("No Anthropic API key. Either add one on the query page (`filovirus serve`), or run\n"
+        print("No Anthropic API key. Run\n"
               "  export ANTHROPIC_API_KEY='sk-ant-api03-...'\n"
               "with your key from https://console.anthropic.com -> API Keys.", file=sys.stderr)
         return 1

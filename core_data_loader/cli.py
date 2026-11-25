@@ -9,8 +9,7 @@
     filovirus compare OTHER_DB        compare contents with another build, table by table
     filovirus export                  core.* -> Neo4j (wipes and rebuilds the graph)
     filovirus graph-report            hubs and isolated nodes in the Neo4j graph
-    filovirus review-stats            precision of human-reviewed links, per confidence level
-    filovirus serve                   the query page, http://localhost:8765
+    filovirus serve                   the dashboard with the full live graph, http://localhost:8765/explore
     filovirus ask "QUESTION"          one plain-English question (needs an API key)
     filovirus rebuild                 load + build + export, the usual refresh
 
@@ -124,11 +123,6 @@ def cmd_graph_report(_args) -> int:
     return _run_module("core_data_loader.graph.report")
 
 
-def cmd_review_stats(_args) -> int:
-    from core_data_loader.graph.review import print_stats
-    return print_stats()
-
-
 def cmd_serve(args) -> int:
     from core_data_loader.graph.web import serve
     serve(args.port)
@@ -190,10 +184,8 @@ def parser() -> argparse.ArgumentParser:
 
     sub.add_parser("graph-report", help="hubs, isolated nodes and degree per label, from Neo4j").set_defaults(
         func=cmd_graph_report)
-    sub.add_parser("review-stats", help="precision of reviewed links per confidence level").set_defaults(
-        func=cmd_review_stats)
 
-    s = sub.add_parser("serve", help="run the query page (http://localhost:8765)")
+    s = sub.add_parser("serve", help="run the dashboard with the full live graph (http://localhost:8765/explore)")
     s.add_argument("--port", type=int, default=8765)
     s.set_defaults(func=cmd_serve)
 

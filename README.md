@@ -13,7 +13,7 @@ question-answering algorithm. That is why links are explicit, typed and carry
 a confidence score.
 
 ```
-data/ ──load──▶ Postgres raw.* ──build──▶ Postgres core.* ──export──▶ Neo4j ──serve──▶ dashboard + query page
+data/ ──load──▶ Postgres raw.* ──build──▶ Postgres core.* ──export──▶ Neo4j ──serve──▶ dashboard
   ▲                                            │
   └── fetch (network lookups, run once)        └── check (data-quality checks)
 ```
@@ -55,7 +55,7 @@ Settings come from environment variables. The defaults fit a local setup:
 | `FILOVIRUS_DATA_DIR` | `./data` |
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | `bolt://localhost:7687` / `neo4j` / `filovirus` |
 | `NCBI_EMAIL` | unset. The contact address sent with PubMed requests by `filovirus fetch` |
-| `ANTHROPIC_API_KEY` | unset. Optional; a key can also be pasted into the query page |
+| `ANTHROPIC_API_KEY` | unset. Only for `filovirus ask` |
 
 ## Dashboard: explore the full graph
 
@@ -92,25 +92,17 @@ after that, searches are instant and subgraphs load in a second or two. After a
 new `filovirus export`, the search picks up the new graph by itself; restart
 `serve` to refresh the totals shown on the page.
 
-## Query page
+## Other ways to query
 
-`filovirus serve` also runs the query page at <http://localhost:8765>:
-
-- **Pick a question (free).** Ready-made questions with dropdowns, such as
-  "Which antibodies target [GP]?" or "Which NIH grants study [Marburg
-  viruses]?". Each runs a fixed, checked query and shows it. Results download
-  as CSV.
-- **Ask in your own words (optional).** Paste an Anthropic API key into the
-  page once and Claude answers any question, showing the queries it ran. Each
-  question costs a few cents. Get a key at
-  <https://console.anthropic.com/settings/keys>.
-- **Review links (free).** Mark keyword-based links right or wrong; their
-  confidence becomes a measured precision (`filovirus review-stats`).
-
-To write Cypher yourself, open Neo4j Browser at <http://localhost:7474> (user
-`neo4j`, password `filovirus`). `CALL db.schema.visualization();` draws every
-node type with the relationships between them; for real data, try
-`MATCH (g:Gene {gene_symbol: 'GP'})<-[r]-(n) RETURN g, r, n LIMIT 50`.
+- **Plain English, in the terminal (optional).** `filovirus ask "Which
+  antibodies target GP?"`: Claude turns the question into Cypher, runs it, and
+  answers, printing every query it ran. It needs `ANTHROPIC_API_KEY` (get a key
+  at <https://console.anthropic.com/settings/keys>) and costs a few cents per
+  question.
+- **Cypher yourself.** Open Neo4j Browser at <http://localhost:7474> (user
+  `neo4j`, password `filovirus`). `CALL db.schema.visualization();` draws every
+  node type with the relationships between them; for real data, try
+  `MATCH (g:Gene {gene_symbol: 'GP'})<-[r]-(n) RETURN g, r, n LIMIT 50`.
 
 ## Published dashboard (static copy)
 
@@ -150,9 +142,8 @@ virtualenv is activated.
 | `check` | only the data-quality checks; every failure count should be 0 |
 | `compare OTHER_DB` | compare this database's contents with another build, table by table |
 | `graph-report` | the Neo4j graph's hubs, isolated nodes and degree per node type |
-| `review-stats` | precision of human-reviewed links, per confidence level (review on the query page) |
 | `export` | rebuild the Neo4j graph from `core.*` (~20 s) |
-| `serve` | the dashboard with the full live graph at <http://localhost:8765/explore>, and the query page at <http://localhost:8765> |
+| `serve` | the dashboard with the full live graph at <http://localhost:8765/explore> |
 | `ask "QUESTION"` | one plain-English question in the terminal (needs an API key) |
 | `rebuild` | `load` + `build` + `export`: the usual refresh after data changes |
 
@@ -166,7 +157,7 @@ why.
 | [docs/data-sources.md](docs/data-sources.md) | which file goes where, required vs optional, and what each fetcher adds |
 | [docs/pipeline.md](docs/pipeline.md) | raw → core → Neo4j, the build order and why it matters, the checks, curated mappings, known data traps |
 | [docs/evidence-layer.md](docs/evidence-layer.md) | how grants, patents and papers link to the graph, confidence scores, what was deliberately left out |
-| [docs/graph.md](docs/graph.md) | the Neo4j model, hubs and the explorer's link limit, the query page, adding ready-made questions, the API key and safety |
+| [docs/graph.md](docs/graph.md) | the Neo4j model, hubs and the explorer's link limit, `filovirus ask` and safety |
 
 `overview/` (git-ignored, shared separately) holds the team's planning
 documents and the SerenQA paper.
@@ -183,7 +174,7 @@ core_data_loader/
 ├── loaders/        one per source: data/ → raw.*            (filovirus load)
 ├── fetchers/       NIH RePORTER / PubMed lookups → data/     (filovirus fetch)
 ├── etl/            raw.* → core.*, run in order by pipeline.py   (filovirus build)
-└── graph/          Neo4j export, live explorer and web server, query page, ready-made questions
+└── graph/          Neo4j export, live explorer and its web server, `filovirus ask`
 dashboard/          research dashboard: template, builders (build_dashboard.py, build_explorer.py), graph snapshot
 sql/                schema DDL (01–10) and the data-quality checks (checks.sql)
 tests/              unit tests: pure logic only, no database needed

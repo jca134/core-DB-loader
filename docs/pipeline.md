@@ -1,7 +1,7 @@
 # The build pipeline
 
 ```
-data/ ──load──▶ raw.*  ──build──▶ core.*  ──export──▶ Neo4j ──serve──▶ query page
+data/ ──load──▶ raw.*  ──build──▶ core.*  ──export──▶ Neo4j ──serve──▶ dashboard
   ▲                                 │
   └── fetch (network, run once)     └── check (sql/checks.sql)
 ```

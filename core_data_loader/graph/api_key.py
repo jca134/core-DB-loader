@@ -1,8 +1,8 @@
 """
-Where the optional Anthropic API key for the query page comes from.
+Where the Anthropic API key for `filovirus ask` comes from.
 
-Order: the ANTHROPIC_API_KEY environment variable, else a key saved from the
-query page. A saved key lives in the user's home directory --
+Order: the ANTHROPIC_API_KEY environment variable, else a key saved earlier
+(by the old query page) in the user's home directory --
 ~/.config/filovirus-graph/anthropic_api_key, readable only by its owner --
 never inside the repository, so it cannot be committed.
 """
@@ -24,23 +24,6 @@ def current_key() -> tuple[str | None, str | None]:
     except (FileNotFoundError, PermissionError):
         return None, None
     return (key, "saved") if key else (None, None)
-
-
-def save_key(key: str) -> None:
-    KEY_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    # Create with owner-only permissions from the start; no window where it's world-readable.
-    fd = os.open(KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(key.strip() + "\n")
-    os.chmod(KEY_FILE, 0o600)
-
-
-def forget_key() -> bool:
-    try:
-        KEY_FILE.unlink()
-        return True
-    except FileNotFoundError:
-        return False
 
 
 def check_key(key: str, model: str) -> tuple[anthropic.Anthropic | None, str | None]:

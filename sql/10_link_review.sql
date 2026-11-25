@@ -1,5 +1,5 @@
--- Human review of evidence links (accept / reject), from the query page's
--- review tab. Lives in ops.*, not core.*, because core.evidence_link is
+-- Human review of evidence links (accept / reject); empty since the query page
+-- that recorded them was removed. Lives in ops.*, not core.*, because core.evidence_link is
 -- rebuilt -- with new ids -- on every build. A review is keyed by what the link
 -- connects, in natural ids that survive rebuilds:
 --   'grant_award:R01AI123456|gene:GP|related'

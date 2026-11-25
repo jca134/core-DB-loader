@@ -63,13 +63,13 @@ organizations and are skipped.
 
 ## Reviewing links
 
-The query page's **Review links** tab shows one keyword-based grant or patent
-link at a time, with the text that produced it, to mark right or wrong.
-Reviews live in `ops.link_review`, keyed by what the link connects in natural
-ids (`grant_award:R01AI123456|gene:GP|related`), so they survive rebuilds;
+Human reviews of keyword-based links (accept / reject) live in
+`ops.link_review`, keyed by what the link connects in natural ids
+(`grant_award:R01AI123456|gene:GP|related`), so they survive rebuilds;
 `etl/evidence.py` copies each decision onto the rebuilt link's
-`review_status`. `filovirus review-stats` reports precision per confidence
-level.
+`review_status`. The table is empty: the query page that recorded reviews was
+removed on 2026-11-25, before any were saved. The table and the copy step are
+kept so a future review tool can write there.
 
 ## Papers
 

@@ -18,7 +18,22 @@ from datetime import date
 
 from core_data_loader.config import PROJECT_ROOT as ROOT
 from core_data_loader.graph.export import LABEL_KEY
-from core_data_loader.graph.templates import VIRUSES
+
+# The viruses offered as starting points, each with the taxon roots it stands for (both genus
+# names where NCBI and ICTV disagree; see docs/pipeline.md, "Known data traps").
+VIRUSES = [
+    ("filoviridae", "All filoviruses (Filoviridae)", [11266]),
+    ("ebola_all", "Ebola viruses, all species (Orthoebolavirus)", [3044781, 186536]),
+    ("zaire", "Ebola virus (Zaire ebolavirus)", [3052462]),
+    ("sudan", "Sudan virus", [3052460]),
+    ("bundibugyo", "Bundibugyo virus", [3052458]),
+    ("tai_forest", "Taï Forest virus", [3052461]),
+    ("reston", "Reston virus", [3052459]),
+    ("bombali", "Bombali virus", [3052457]),
+    ("marburg_all", "Marburg viruses (Orthomarburgvirus)", [3044783, 186537]),
+    ("lloviu", "Lloviu virus (Cuevavirus)", [1513236]),
+    ("mengla", "Mengla / Dehong viruses (Dianlovirus)", [2733240]),
+]
 
 LABELS = list(LABEL_KEY)
 LABEL_INDEX = {label: i for i, label in enumerate(LABELS)}

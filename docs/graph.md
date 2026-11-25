@@ -1,4 +1,4 @@
-# The graph: Neo4j and the query page
+# The graph: Neo4j and the dashboard
 
 Postgres is the source of truth. `filovirus export` wipes Neo4j and rebuilds
 it from `core.*` in about 20 seconds, so rerun it after every build
@@ -62,37 +62,28 @@ Write Cypher yourself in Neo4j Browser: <http://localhost:7474>. To see the
 whole model at a glance, with every label and relationship type, run
 `CALL db.schema.visualization();`.
 
-## The query page
+## The dashboard
 
-`filovirus serve` serves <http://localhost:8765>, on this computer only.
-
-**Explore the graph (free).** <http://localhost:8765/explore> is the research
+`filovirus serve` serves <http://localhost:8765/explore>, on this computer
+only. It is the research
 dashboard (`dashboard/`), with its graph explorer reading Neo4j live through
 `graph/explore.py`: search any record, see and export everything within 1–3
 steps of it. Unlike the published dashboard, which embeds a trimmed copy of the
 graph, it covers every node, Feature nodes included. Search runs over an
 in-memory list of every node, built on the first search (about 7 s) and rebuilt
 when the node count changes, i.e. after `filovirus export`; subgraphs are
-walked in Neo4j one step at a time (about 2 s for 30,000 nodes).
+walked in Neo4j one step at a time (about 2 s for 30,000 nodes). Picking
+"Ebola viruses" or "Marburg viruses" starts from both genus names (see
+[pipeline.md](pipeline.md#known-data-traps)).
 
-**Pick a question (free).** The ready-made questions in `graph/templates.py`
-each have dropdown blanks. Every one is a fixed, reviewed Cypher query, and
-the dropdown values reach Neo4j only as query parameters. Picking "Ebola
-viruses" or "Marburg viruses" searches both genus names (see
-[pipeline.md](pipeline.md#known-data-traps)). Results download as CSV.
+## Plain-English questions
 
-To add a question, append to `TEMPLATES`. Use `$name` for each `{name}` blank,
-and alias each returned column with its header. A column named `Link` is
-rendered as a link.
+`filovirus ask "..."` (`graph/ask.py`): Claude turns the question into Cypher,
+runs it, reads the rows, refines the query if needed, and answers, printing
+every query it ran.
 
-**Ask in your own words (optional).** Claude (`graph/ask.py`) turns the
-question into Cypher, runs it, reads the rows, refines the query if needed,
-and answers. The page shows every query it ran. The same works from the
-terminal with `filovirus ask "..."`.
-
-- **Key:** `ANTHROPIC_API_KEY` if set; otherwise one pasted into the page. A
-  pasted key is checked with Anthropic first, then saved owner-only in
-  `~/.config/filovirus-graph/`, never inside the repo.
+- **Key:** `ANTHROPIC_API_KEY`, or a key saved earlier (by the old query page)
+  owner-only in `~/.config/filovirus-graph/`, never inside the repo.
 - **Cost:** a few cents per question.
 - **Graph description:** `filovirus ask --show-schema` prints what Claude is
   given. It is generated from the live graph, so it stays current.
@@ -127,6 +118,6 @@ only; it doesn't change the graph or anything scored from it.
 
 - **Read-only queries.** Every query runs in a read-only Neo4j transaction
   with a 30 s limit, so a generated `DELETE` is rejected.
-- **Local only.** The page answers only `localhost` requests, and refuses
-  cross-site and non-JSON POSTs, so another website open in the same browser
-  can't spend your key or read results.
+- **Local only.** The dashboard server answers only `localhost` requests,
+  and refuses cross-site and non-JSON POSTs, so another website open in the
+  same browser can't read the graph through it.
