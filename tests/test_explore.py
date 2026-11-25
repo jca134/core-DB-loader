@@ -41,7 +41,7 @@ class FakeGraph:
             return [{"c": c} for c in found]
         if "MATCH (n)-[e]-(m)" in cypher:
             out = {(a, b) for a, _, b in self.edges if a in ids} | {(b, a) for a, _, b in self.edges if b in ids}
-            return [{"n": n, "m": m, "c": self.confidence.get(frozenset((n, m)), 0.0)} for n, m in out]
+            return [{"n": n, "m": m, "c": self.confidence.get(frozenset((n, m)), 1.0)} for n, m in out]
         if "MATCH (a)-[e]->(b)" in cypher:
             return [{"a": a, "t": t, "b": b, "c": None, "m": None, "sc": None} for a, t, b in self.edges if a in ids]
         raise AssertionError(f"unexpected query: {cypher}")
@@ -113,12 +113,13 @@ class TestSubgraph:
         for k in range(5):      # the gene family becomes a hub: five more proteins point to it
             g.nodes[f"q{k}"] = ("Protein", {"protein_id": 10 + k, "name": f"VP35 {k}"})
             g.edges.append((f"q{k}", "IN_FAMILY", "f"))
-        g.confidence[frozenset(("q3", "f"))] = 0.9
+        for k in range(4):      # four of them only weak keyword matches
+            g.confidence[frozenset((f"q{k}", "f"))] = 0.25
         r = LiveExplorer(g).subgraph({"ids": ["g"], "hops": 2, "per": 2})
         # the start passes on all its links (the family and the antibody); the family passes on
-        # its best two of six: q3 by confidence, then one more
+        # its best two of six: the curated links with no confidence (p, q4) count as certain
         assert len(r["ids"]) == 1 + 2 + 2
-        assert "q3" in r["ids"]
+        assert {"p", "q4"} <= set(r["ids"])
         assert r["limited"] == {r["ids"].index("f"): (2, 7)}
         assert len(LiveExplorer(g).subgraph({"ids": ["g"], "hops": 2})["ids"]) == 9
 

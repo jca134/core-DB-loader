@@ -203,8 +203,10 @@ class LiveExplorer:
         # Links followed per record past the start (0: all). The start records pass on every link;
         # each record reached after that passes on only its `per` best links not already walked,
         # ranked by edge confidence and then by the neighbor's links, as SerenQA's neighbor
-        # scoring does (Appendix D.3). Without it, step 2 runs through a gene family or a virus
-        # with thousands of links and reaches most of the graph.
+        # scoring does (Appendix D.3). Only inferred links (RELATED, CLAIMS) have confidences
+        # below 1; a curated link with none is a recorded fact, so it counts as 1.0, above
+        # uncertain keyword matches. Without the limit, step 2 runs through a gene family or a
+        # virus with thousands of links and reaches most of the graph.
         per = max(0, int(body.get("per") or 0))
         hop = {i: 0 for i in roots}
         limited = {}            # element id -> (links followed, links it has)
@@ -213,7 +215,7 @@ class LiveExplorer:
             cand = {}
             for r in self._batched("UNWIND $ids AS id MATCH (n) WHERE elementId(n) = id "
                                    "MATCH (n)-[e]-(m) RETURN id AS n, elementId(m) AS m, "
-                                   "max(coalesce(e.confidence, 0.0)) AS c", frontier):
+                                   "max(coalesce(e.confidence, 1.0)) AS c", frontier):
                 if r["m"] not in hop and r["m"] in by_id:
                     cand.setdefault(r["n"], []).append((r["c"], by_id[r["m"]][3], r["m"]))
             nxt = []

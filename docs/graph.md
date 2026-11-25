@@ -116,7 +116,9 @@ The subgraph explorer (`filovirus serve`, /explore, and the dashboard copy)
 applies that neighbor scoring to what it shows. The starting record passes on
 all its links; every record reached after it passes on only its best N links
 not already walked ("Links followed per record", default 25, or All), ranked
-by edge confidence and then by the neighbor's degree. Without it, two steps
+by edge confidence and then by the neighbor's degree. Only inferred links
+(`RELATED`, `CLAIMS`) have confidences below 1; a curated link with no
+`confidence` is a recorded fact and counts as 1.0. Without it, two steps
 from a protein reach 3,700-9,400 nodes through its gene family; with 25, 29.
 Records that were limited are marked in the table. This is a viewing limit
 only; it doesn't change the graph or anything scored from it.
